@@ -1,0 +1,102 @@
+GNC LEEM - codigo generado para STM32H7 (Cortex-M7)
+Version 1_5, generado 2026-10-06 00:36
+Embedded Coder, ert.tlc, ARM Compatible->ARM Cortex-M, solo generacion.
+La compilacion cruzada se hace en STM32CubeIDE / arm-none-eabi-gcc.
+
+--------------------------------------------------------------------
+CARPETAS
+--------------------------------------------------------------------
+  shared/          utilidades comunes a los tres modelos. UNA sola vez:
+                   si se duplican, el enlazado da "multiple definition".
+  nav/             navegacion (INS + MQEKF de 15 estados)
+  state_machine/   maquina de estados de mision
+  gc/              guiado, control del aerofreno y pirotecnia
+
+  En CubeIDE: las cuatro carpetas al include path y todos los .c al build.
+
+--------------------------------------------------------------------
+PLANIFICACION
+--------------------------------------------------------------------
+Al arrancar, una vez:
+  nav_initialize();  state_machine_initialize();  gc_initialize();
+
+Temporizador a 400 Hz (2.500 ms). En cada tick:
+  1) rellenar nav_U con las dos IMU, el baro y el GNSS
+     data_valid = 1 SOLO en el tick en que llega dato nuevo de ese sensor.
+     Con un nivel fijo a 1 el filtro inyecta la misma medida muchas veces y
+     la covarianza colapsa: queda sobre-confiado y deja de aceptar fixes.
+  2) nav_step()
+  3) rellenar state_machine_U con nav_Y y la telemetria
+  4) state_machine_step()
+
+Cada 8 ticks (50 Hz):
+  5) rellenar gc_U con nav_Y y state_machine_Y
+     COPIA COMPLETA de una vez: el guiado tiene que ver todos los campos
+     del MISMO ciclo. Mezclar posicion de un ciclo con velocidad del
+     siguiente son decimas de m/s de incoherencia en pleno boost, y el
+     propagador de apogeo predice entonces una trayectoria que no existe.
+  6) gc_step()
+  7) gc_Y.actuator_cmd [0..1] -> servo del aerofreno
+     gc_Y.drogue_deploy_flag / main_deploy_flag -> canales pirotecnicos
+     Son PULSOS acotados, no niveles: pasarlos tal cual al canal.
+
+IMPORTANTE: state_machine_Y.rocket_state que se mete en nav_U es el del
+ciclo ANTERIOR. Es lo que rompe el lazo nav <-> state_machine, igual que en
+la simulacion. Alimentarlo con el del mismo ciclo no se puede: cada uno
+necesita la salida del otro.
+
+--------------------------------------------------------------------
+SENSORES: ritmo y decimacion
+--------------------------------------------------------------------
+  IMU (WSEN-ISDS y LSM6DSV32X)   400 Hz, todos los ticks
+  Barometro (WSEN-PADS)          chip a 75 Hz de ODR, leer cada 6 ticks (66.7 Hz)
+  GNSS (MAX-M10S)                10 Hz, cada 40 ticks
+
+  El GNSS hay que configurarlo con dynModel = 8 ("Airborne <4g"), que es el
+  modelo dinamico mas permisivo. Aun asi se caera durante todo el impulso,
+  porque el cohete pasa de 4 g: eso esta previsto y la navegacion aguanta en
+  inercial. Con el valor por defecto (Portable) se cae mucho antes y tarda
+  mas en reengancharse.
+
+--------------------------------------------------------------------
+AJUSTABLES EN CAMPO
+--------------------------------------------------------------------
+Variables globales escribibles desde telemetria. Solo en READY o
+MAINTENANCE: cambiarlas en vuelo deja el guiado persiguiendo un objetivo
+distinto del que uso el propagador en el ciclo anterior.
+
+  extern nav_tun_bus nav_tun;
+  extern sm_tun_bus sm_tun;
+  extern gc_tun_bus gc_tun;
+
+  nav_tun.rail_elev_deg          [deg  ] elevacion de la rampa (inclinometro)
+  nav_tun.rail_azim_deg          [deg  ] azimut de la rampa (brujula)
+  sm_tun.launch_accel_g_thr     [g    ] umbral de deteccion de lanzamiento
+  gc_tun.apogee_target_agl_m    [m AGL] apogeo objetivo
+  gc_tun.min_ctrl_alt_agl_m     [m AGL] altura minima para abrir el aerofreno
+  gc_tun.main_deploy_alt_agl_m  [m AGL] altura de apertura del paracaidas principal
+  gc_tun.drogue_delay_s         [s    ] retardo del drogue tras el apogeo
+
+--------------------------------------------------------------------
+INTERFAZ POR MODELO
+--------------------------------------------------------------------
+
+NAV  -  400 Hz  -  navegacion (INS + MQEKF de 15 estados)
+    extern void nav_initialize(void);
+    extern void nav_step(void);
+    extern ExtU_nav_T nav_U;
+    extern ExtY_nav_T nav_Y;
+
+STATE_MACHINE  -  400 Hz  -  maquina de estados de mision
+    extern void state_machine_initialize(void);
+    extern void state_machine_step(void);
+    extern ExtU_state_machine_T state_machine_U;
+    extern ExtY_state_machine_T state_machine_Y;
+
+GC  -  50 Hz  -  guiado, control del aerofreno y pirotecnia
+    extern void gc_initialize(void);
+    extern void gc_step(void);
+    extern ExtU_gc_T gc_U;
+    extern ExtY_gc_T gc_Y;
+
+La composicion de cada estructura esta en <modelo>.h y <modelo>_types.h.

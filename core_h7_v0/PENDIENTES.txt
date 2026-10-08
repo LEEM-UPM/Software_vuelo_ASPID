@@ -1,0 +1,2383 @@
+PENDIENTES (todas las placas)
+============================
+
+Leyenda:  [ ] pendiente   [x] hecho
+          IMPL = implementar   PROBAR = probar en placa   DECIDIR = decision de diseño
+          REVISAR = comprobar en esquematico / CubeMX
+
+Al terminar algo, marcarlo con [x] (o borrarlo) en el mismo commit.
+
+
+[x] ARREGLO !!! MEMORIA DE VUELO LLENA EN SEGUNDOS (visto 2026-10-07). Sintoma:
+            la core arrancaba en POSTVUELO (sin GNC: "nav --", 0 muestras por
+            tick, como si no llegara la avionica) y pitando, con la flash
+            4096 de 4096 y "vuelo #26887". Causa: emergencia_vigilar() tomaba
+            el despegue por el NIVEL de EN VUELO. Un golpe a la avionica en el
+            banco (3 g durante 60 ms: al conectarle el ST-Link) le dio al GNC
+            el despegue; en el suelo paso a APOGEO al momento con la
+            navegacion a 0 m, asi que el vuelo se cerraba, se olvidaba (no
+            paso de 100 m) y en la vuelta siguiente se volvia a abrir: dos
+            escrituras por vuelta. El ultimo, abierto, se quedo sin sitio para
+            olvidarse. Arreglo: despegue por FLANCO, como las camaras y la SD.
+            Prueba nueva en el PC (escenario 12): de 10000 escrituras a 2, y un
+            despegue posterior se sigue guardando; los 12 escenarios pasan.
+            En la placa: sector 3 borrado por el ST-Link (copia en el
+            scratchpad, g4cmp/sector3.bin), firmware nuevo, arranque normal,
+            sin pitido, nav OK. (El firmware de la avionica estaba bien: su
+            flash es identica a lo compilado.)
+[ ] DECIDIR !!! FALSO DESPEGUE EN EL BANCO (o en la rampa): el GNC da el
+            despegue con 3 g durante 60 ms (sm_tun.launch_accel_g_thr, 24
+            ticks) y no hay armado. Un golpe a la avionica lo provoca, y
+            desde ahi TODO actua como en vuelo: el despliegue manda el drogue
+            (1A+1B) y el main (2A) a power cuando el GNC levanta las banderas,
+            el aerofreno puede salir, las camaras se encienden, la radio pasa
+            a 15 Hz y pita. El cerrojo de la rampa de la estacion NO lo
+            cubre: es a bordo. Mirar en la SD1 (eventos.csv de la sesion del
+            golpe) si llego a mandar pirotecnia. Opciones: (a) a bordo, no
+            mandar pirotecnia sin altura de verdad (p. ej. maxima del
+            barometro o del GNC por encima de 50 m, como el modo de emergencia
+            que no dispara por debajo de 20 m); (b) que GNC endurezca la
+            deteccion (mas g o mas tiempo, o confirmarla con el barometro);
+            (c) un armado desde tierra.
+
+[x] IMPL    PITIDO DE VUELO (2026-10-07, pedido por el usuario): un pitido de
+            200 ms cada segundo (2,7 kHz) en cualquier estado de vuelo que no
+            sea la espera en tierra: reiniciada en el aire, POSTVUELO, o GNC
+            fuera de IDLE (incluido EN TIERRA tras aterrizar: sigue pitando
+            hasta apagar, para encontrar el cohete), o lanzamiento visto por
+            las IMU. No bloquea (sounds_pitido_vuelo). Probado con la prueba de
+            emergencia: pita en emergencia y en POSTVUELO, calla en el
+            arranque normal; leido el TIM15 por el ST-Link: 2,7 kHz, sonando
+            el 20 % del tiempo. La consola lo dice ("Pitido de vuelo").
+[ ] PROBAR  ESCUCHAR EL PITIDO: no se ha oido (lo probe sin estar delante). Si
+            suena flojo, cambiar SOUNDS_PITIDO_HZ (sounds.h) buscando la
+            resonancia del zumbador.
+[ ] DECIDIR PITIDO EN SIMULAR RUTA: hoy pita mientras dura la simulacion (el
+            GNC sale de IDLE, igual que en vuelo). Si molesta en el banco,
+            excluirla en _pitido_de_vuelo() (flight_software.c).
+[x] IMPL    AEROFRENO: EL 0 % EMPIEZA CON 4 mm DE EXTENSION (2026-10-07,
+            pedido por el usuario). AIRBRAKE_CERO_MM en airbrake.h: el 0 %
+            queda 4 mm fuera del tope de dentro (manivela 24,4 grados, servo
+            72,1, byte 102 en vez de 128) y el 100 % sigue en el tope de fuera
+            (byte 14): carrera util 27,49 mm de los 31,49. Todo pasa por ahi:
+            el GNC, el recogido en tierra, emergencia y las pruebas de tierra.
+            Comprobado en la consola: 0 % -> servo 102/255, 72,1 grados.
+            OJO: el usuario dio 31,55 mm de carrera y la geometria del PDF da
+            31,49 (X_MAX - X_MIN): se tomo la del codigo. Si la de verdad es
+            31,55, revisar X_MIN/X_MAX.
+            AVISAR A GNC: su 0..1 ahora son 27,49 mm de carrera empezando 4 mm
+            fuera, no los 31,49 desde el tope.
+
+[x] IMPL    BUS-OFF Y WATCHDOG EN LAS CUATRO PLACAS (2026-10-07).
+            - Bus-off: todas miran PSR.BO en cada vuelta (tambien esperando el
+              wake up) y quitan CCCR.INIT. Core: can_driver_poll_bus_off(),
+              CAN1 y CAN2, contador en la consola y evento en la SD. Power y
+              avionica: Drivers/Can_driver/canBusOff (FDCAN1 y FDCAN2). RF:
+              dentro de can_node_poll() (FDCAN1; el FDCAN2 no se arranca).
+              Requisito apuntado en el ICD (2.1).
+            - Watchdog: IWDG de 1 s en power, avionica y RF, arrancado justo
+              antes del bucle principal (el core ya tenia el suyo de 2 s). La
+              calibracion de la avionica (2 s) lo refresca ella misma.
+            - HardFault/MemManage/BusFault/UsageFault y Error_Handler()
+              reinician en las tres (como ya hacia el core).
+            PROBADO EN EL CORE: con CAN_DRIVER_PRUEBA_BUS_OFF a 1 (tira el bus
+            con el transceptor en standby) CAN1 y CAN2 caen en bus-off y
+            vuelven solos: siguen la telemetria, las placas y los sensores del
+            GNC (nav OK). Dejado a 0.
+[ ] PROBAR  GRABAR POWER, RF Y AVIONICA con lo de arriba (compiladas, SIN
+            GRABAR: solo esta conectado el ST-Link del core). Comprobar en
+            cada una: que arranca y contesta al wake up como antes; bus-off
+            juntando CANH y CANL un momento con todo encendido (tiene que
+            volver sola; en la RF la consola dice "CAN1 sacado de bus-off");
+            y, en la RF, "Arranque por: ..." al encender.
+[x] IMPL    TELEMETRIA A 3 Hz HASTA EL LANZAMIENTO (2026-10-07, pedido por el
+            usuario). rf_telemetry.c: 3 Hz en tierra (9,3 % de aire, se puede
+            sostener en la rampa sin limite), 15 Hz desde el lanzamiento (GNC
+            EN VUELO, 3 g durante 100 ms o arranque en emergencia) hasta el
+            siguiente arranque. SIMULAR RUTA: 15 Hz mientras dura y vuelve a 3.
+            Probado: 3 Hz en tierra; 15 Hz en la prueba de emergencia (tambien
+            tras los reinicios por watchdog y por fallo), 3 Hz al arrancar en
+            POSTVUELO. La consola dice la que toca y por que. La demo de la
+            estacion hace lo mismo.
+[ ] DECIDIR TELEMETRIA TRAS EL ATERRIZAJE: hoy se queda en 15 Hz hasta apagar,
+            y a 15 Hz el presupuesto de una hora se agota en 13 minutos. Si la
+            recuperacion tarda, bajar a 3 Hz al aterrizar (fase EN TIERRA, o
+            el mismo fin de vuelo que usan las camaras y la SD) o a los X min.
+[x] IMPL    CERROJO DE LA RAMPA EN LA ESTACION (2026-10-07, pedido por el
+            usuario; resuelve el DECIDIR "MODO TEST EN LA RAMPA"). Boton RAMPA
+            en el mando: arranca BLOQUEADO y se quita con la contrasena 1234
+            (CLAVE_DESBLOQUEO, estacion.py). Bloquea entrar en modo test,
+            pirotecnia, SIMULAR RUTA, prueba y extension del aerofreno; deja
+            pasar lo que para algo, ping, estado, camaras y el angulo y rumbo
+            de la rampa (estos NO se bloquean: decidido 2026-10-08). Al ponerlo sale del modo test y para la
+            simulacion. Probado en modo demo (21 comprobaciones, 0 fallos):
+            con el cerrojo no sale nada peligroso por ningun camino. Es de la
+            estacion: el cohete no lo sabe (prueba_radio.py no lo tiene).
+
+[x] IMPL    REINICIO EN VUELO (2026-10-07): App/memoria_vuelo.c (flash,
+            sector 3), App/baro_alt.c, App/emergencia.c, App/watchdog.c.
+            Al arrancar, antes de la melodia: si hay un vuelo sin terminar y
+            el barometro (o la aceleracion) dice que esta en el aire, modo de
+            EMERGENCIA en < 1 s: aerofreno fuera hasta el apogeo (no con el
+            motor), drogue (1A+1B) a 10 m bajo la maxima, main (2A) a 400 m,
+            solo con barometro fiable (descarta ruido/saltos transonicos).
+            Vuelo terminado + reset -> POSTVUELO (ni SD ni camaras ni piros).
+            Apagar y encender a proposito -> se olvida (otro dia).
+            Watchdog de 2 s y los fallos (HardFault...) reinician en vez de
+            colgarse. Paquete de vuelo: estado 4 EMERGENCIA; de estado v6.
+            Estacion: panel SISTEMA y registro (--demo-emergencia).
+            Probado en el PC con 11 casos (reinicio en coast con ruido
+            transonico, bajando con drogue, drogue pendiente, baro congelado
+            y el otro con 5 % de error de escala, ruido siempre, en el suelo,
+            terminado, motor encendido, vuelo normal guardando).
+[x] PROBAR  REINICIO EN VUELO EN LA MESA (2026-10-07, EMERGENCIA_PRUEBA a
+            1): vuelo falso en la flash y reinicio por software -> EMERGENCIA
+            con las placas despiertas en 77 ms; barometro no fiable durante
+            el ruido "transonico" y fiable 0,5 s despues; aerofreno al 100 %
+            (servo 14/255) y recogido en el apogeo; drogue (1A+1B, sin
+            mandar de verdad) 10 m bajo la maxima; main a 398 m; camaras
+            encendidas y apagadas al terminar; suelo; reinicio -> POSTVUELO
+            con la memoria intacta; limpieza -> arranque normal. 0 fallos de
+            flash. La core lleva otra vez el firmware de vuelo (a 0).
+            La camara 1 NO CONTESTO en esa prueba: comprobar que esta
+            conectada.
+[x] PROBAR  REINICIO EN VUELO, mas pruebas en la mesa (2026-10-07):
+            - WATCHDOG de verdad: bucle colgado en emergencia -> reinicio
+              "reset: WATCHDOG" y sigue en emergencia. Fallo de memoria de
+              verdad (escritura prohibida por la MPU) -> reinicio y sigue.
+              Reset bajando con el drogue -> no lo repite (10 ordenes 1A/1B
+              antes, 0 despues).
+            - Ruido de los barometros de verdad, 2 min quietos: RMS de la
+              segunda diferencia 0,37-0,39 m de media y 0,60 de maximo (umbral
+              2 m); 0 muestras sucias de 23000; altura -2,1..+1,5 m. La
+              velocidad (primera menos ultima de la ventana) daba hasta 8,5
+              m/s en reposo: ahora es la pendiente por minimos cuadrados (~4
+              m/s de pico) y "quieto" es < 5 m/s.
+            - SIMULAR RUTA entera (VUELO.BIN, 3008 m): la memoria no escribe
+              nada (0 escritos en 99 informes).
+            - Sector lleno (3093 registros, 0 fallos) -> el siguiente arranque
+              lo borra en 948 ms (todo parado) y conserva el ultimo registro.
+              Escribir un registro: 83-107 us.
+            - Por radio con el puente y la estacion (sin ventana, su mismo
+              codigo): EMERGENCIA, baro no fiable/fiable, apogeo, main 400 m,
+              camaras parando y apagadas, EN TIERRA, POSTVUELO. Modo test y
+              apagar camaras DENEGADOS (no esta en tierra); 10 pirotecnicos
+              1A recibidos y 10 DENEGADOS (sin modo test).
+            Arreglado al probar: tras cada reinicio la altura salia 0 m hasta
+            que el barometro era fiable (ahora la maxima guardada) y el
+            aerofreno se recogia y volvia a salir (ahora sigue fuera en coast).
+[ ] PROBAR  REINICIO EN VUELO con el usuario: corte de corriente en mitad del
+            vuelo falso (tiene que seguir en emergencia desde la flash; en el
+            suelo, olvidar el vuelo), camara de vacio con los barometros
+            reales, y la camara 1 conectada (en las pruebas NO CONTESTO).
+[ ] REVISAR SUBIDA en las pruebas de emergencia (2026-10-07): de 24 comandos
+            llegaron 3 y de 25 pirotecnicos 10 (12 % y 40 %), con la core
+            cerca del puente. Mismo asunto que la entrada de la subida.
+[ ] DECIDIR REINICIO EN VUELO, limites que conviene conocer:
+            - El despegue lo da el GNC (EN VUELO). Si el GNC no lo detectara,
+              no habria vuelo guardado y un reinicio en el aire arrancaria
+              normal (con el GNC alineandose en vuelo).
+            - Cerca de Mach 1 el barometro puede tener un ERROR SUAVE (sin
+              ruido) que no se descarta; un falso apogeo en subida haria
+              abrir el drogue a mucha velocidad. Si el cohete pasa de ~Mach
+              0,7, valorar un bloqueo por tiempo de vuelo o por velocidad.
+            - Sin barometro fiable no se dispara nada (no hay plan B por
+              tiempo).
+            - Un reinicio en vuelo corta la corriente de las camaras (PA2
+              cae al reiniciar): el video en curso puede perderse; vuelven a
+              grabar en ~4 s.
+            - Tras la emergencia la SD no se usa: lo de despues del reinicio
+              solo queda en la estacion (telemetria).
+[ ] REVISAR El enlazador (STM32H723XX_FLASH.ld) limita la flash a 384K para
+            dejar el sector 3 a la memoria de vuelo. Si CubeMX lo regenera,
+            volver a ponerlo (la consola avisa: "NO DISPONIBLE").
+
+
+[ ] PROBAR  REGISTRO SD1: la fecha con un GPS de verdad (hoy el GPS no
+            arranca en la mesa; solo probado con la fecha falsa de
+            ASPID_DATA_PRUEBA). Mirar que la carpeta se renombra y que
+            hora_utc cuadra.
+[x] PROBAR  REGISTRO SD1: SIMULAR RUTA graba en simulaciones/ y no sella.
+            Probado 2026-10-05 (3491 filas de vuelo y 4565 de trust curve,
+            releidas de la tarjeta, 0 ticks perdidos).
+[x] IMPL    REGISTRO SD1 SIN BLOQUEAR (2026-10-05): escritura por DMA a mano
+            sobre los registros del SDMMC (sd_card_write_start/poll), en
+            archivos reservados en tierra; tamanos al directorio cada segundo,
+            tambien por DMA. Probado desconectando la SD1 en pleno vuelo de
+            prueba: TARJETA PERDIDA en el acto, 0 ticks perdidos, radio y
+            consola siguen. Con el HAL el bucle se quedaba 13,8 s parado.
+            Y trust_curve/ con las IMU a 400 Hz durante el motor.
+[ ] REVISAR REGISTRO SD1, lo que aun bloquea (todo en tierra o al terminar):
+            crear la sesion y reservar (~80 ms, antes del bucle), renombrar la
+            carpeta cuando llega la fecha del GPS (~50 ms, un tick del GNC en
+            la rampa), crear los archivos de una simulacion, cerrar. Si la
+            tarjeta muere justo durante una de esas, el HAL puede esperar ~14 s
+            (SDMMC_GetCmdResp1). Las simulaciones ademas escriben VUELOLOG.CSV
+            por FileX (gnc_playback.c), bloqueante.
+[x] PROBAR  CAMARAS (2026-10-06, App/camaras.c, comando 0x17, paquete de
+            estado v5 byte 31 b3). Probado: en la estacion en demo (encender,
+            apagar, denegado en vuelo, reintentos con 5 ordenes perdidas,
+            encendido solo al despegar) y en la core (apagadas al arrancar, el
+            paquete de estado lo dice, se encienden en el despegue de prueba y
+            el paquete pasa a 0x08). Y por radio con la estacion y el puente
+            (2026-10-06, probado por el usuario): encender y apagar con
+            confirmacion, y el primer LED en violeta con ellas encendidas.
+[ ] REVISAR SUBIDA: en esa prueba hubo 10 s (00:23:10-00:23:20) en que no
+            llego ninguno de 12 comandos (3 de rafaga + 9 reintentos) mientras
+            la bajada seguia a 15 paquetes/s. Los reintentos hicieron su
+            trabajo, pero 12 perdidos seguidos es mucho para el ~30 % de
+            acierto medido: mirar si los reintentos vuelven a caer en fase con
+            la telemetria o si la RF del cohete deja de escuchar a ratos.
+[ ] PROBAR  CAMARAS: APAGADO SOLO AL TERMINAR EL VUELO (2026-10-06). Mismas
+            condiciones que el registro de la SD (50 m bajando tras el apogeo,
+            EN TIERRA o 20 min; si no paso de 100 m se rearman). Probado en el
+            PC compilando camaras.c con 6 vuelos inventados (normal, golpe en
+            la rampa, simulacion, sin nav, golpe corto, encendidas desde tierra
+            antes): todo bien. Al probarlo salio que contar ticks vistos
+            alargaba los 100 ms del despegue por las IMU: ahora se cuenta
+            tiempo, tambien en el registro de la SD. Ya esta grabado en la core
+            (2026-10-06); FALTA verlo en un vuelo de verdad.
+[x] VOLAR   CAMARAS_PRUEBA_UART vuelve a estar a 0 y la core lleva el
+            firmware de vuelo (2026-10-06). La prueba de la mesa (a 1) enciende
+            las camaras sola a los 25 s, las apaga a los +40 s, etc., y usa la
+            hora de la compilacion como si fuera la del GPS.
+[x] IMPL    CAMARAS POR UART, LAS DOS (2026-10-06): App/camara.c (cada camara)
+            y App/camaras.c (las dos, PA2, vuelo, apagado, paquete de radio).
+            - Si graba: por el espacio libre de su tarjeta, leido cada 1 s.
+            - Graba sola al encenderse; si a los 10 s esta parada, pulsa el
+              boton UNA vez; si sigue parada, NO GRABA (y tierra lo ve).
+            - Apagar (50 m o tierra) = pulsar para parar, confirmar que paro
+              (espacio libre quieto 3 s), 1,5 s mas y cortar PA2. Max 12 s.
+            - Reloj con la hora del GPS (UTC, CAMARAS_HUSO_H): la Split 4 le
+              suma su huso (+8 h) a lo que se escribe; se aprende solo.
+            - Paquete de camaras por radio (0xCA, 32 B, PROTOCOLO.md 4.3) y
+              estacion: panel SISTEMA (graban N de 2), panel SALUD (una linea
+              por camara), registro y camaras/camaras.csv.
+            - Camara 2: UART9 (PD15 TX, PD14 RX), mismo codigo.
+            Probado: en el PC con 8 casos (camara de mentira: sin grabar al
+            encender, tarjeta mala, apagar al segundo, encender mientras se
+            apaga, cable suelto, vuelo hasta 50 m, solo la 2) y en la mesa con
+            la camara 1 (graba a los 4 s, reloj puesto, dos apagados limpios
+            en 5,5 s, 0 errores de CRC; la 2, sin conectar, NO CONTESTA).
+[ ] PROBAR  CAMARA 2 de verdad en el UART9 (PD15/PD14): hoy no estaba
+            conectada. Ver en la consola "Camara 2 (UART9)" y en la estacion.
+[ ] PROBAR  Videos de las pruebas de la mesa del 2026-10-06 en la tarjeta de
+            la camara 1: los parados con el boton antes de cortar la corriente
+            tienen que reproducirse bien; los fps de verdad (la lista dice
+            1080P60, el detalle de RESOLUTION dice la opcion 1 = 1080P50).
+[ ] DECIDIR CAMARAS AL DESPEGAR: tardan ~3 s en arrancar y grabar, asi que
+            encendidas por el despegue se pierden los primeros 3 s del vuelo.
+            Si se quiere el despegue en video, encenderlas desde tierra en la
+            rampa (con la tarjeta de 32 GB caben ~89 min).
+[ ] DECIDIR Hora del reloj de las camaras: UTC (como el registro de la SD) o
+            la de Espana (CAMARAS_HUSO_H = 2 en verano).
+[x] IMPL    CAMARAS: CONTROL POR UART (2026-10-06, investigacion). Drivers/Runcam
+            (RunCam Device Protocol, 115200, recepcion por interrupcion) con la
+            camara 1 en el UART8 (PE1 TX, PE0 RX). Probado con la Split 4:
+            - Contesta a los 3 s de darle corriente: protocolo 1, funciones
+              0x0077 = boton de encendido, wifi, cambiar modo, ajustes,
+              pantalla, EMPEZAR a grabar. NO tiene PARAR ni el OSD de 5 teclas.
+            - Arbol de ajustes (una sola carpeta, 7): CHARSET (BF/CF, del OSD),
+              COLUMNS (30 fijo), TV_MODE (NTSC/PAL), SDCARD_CAPACITY
+              (3821/3839, solo lectura), REMAINING_TIME (657, solo lectura),
+              RESOLUTION (1080P60, 1080P50, 1080P30, 720P60; la lista dice
+              1080P60 pero el detalle dice la opcion 1 = 1080P50: aclarar),
+              CAMERA_TIME (texto, 20210907T000002.0: el reloj vuelve a
+              2021-09-07 00:00 en cada arranque).
+            - Con la microSD vieja (3839 MB) esos dos valores no cambiaban
+              nunca: NO GRABABA, y nada mas lo decia. Con una de 32 GB
+              (2026-10-06) SI: SDCARD_CAPACITY es libre/total en MB y baja
+              ~5,7 MB/s (46 Mbit/s); REMAINING_TIME son segundos (5337 = 89
+              min). Asi se sabe si graba: si el espacio libre baja.
+            - Graba sola al encenderse (ya baja a los 3 s). El BOTON DE
+              ENCENDIDO (op 1) la para en ~1 s y la vuelve a poner a grabar en
+              ~2 s: es un interruptor. EMPEZAR A GRABAR (op 3) NO hace nada
+              aunque diga tenerlo (el fallo conocido de la Split 4).
+            Lo que se hizo con esto, en la entrada de arriba (CAMARAS POR
+            UART, LAS DOS).
+[x] PROBAR  REGISTRO SD1: eventos/eventos.csv, salud/salud.csv, la ficha de
+            configuracion y "donde cayo" en sesion.txt. Probado 2026-10-06 en
+            un vuelo de prueba, releido de la tarjeta, 0 bytes perdidos. (Salio
+            un fallo: con anillos de un solo bloque, salud.csv dejaba de crecer;
+            ahora todos son de dos bloques como minimo, comprobado al compilar.)
+            FALTA ver "donde cayo" con un GPS de verdad.
+[ ] REVISAR CHKDSK DE LA SD1 (2026-10-07, solo lectura, sin /F): en casi todas
+            las sesiones (0094, 0112-0117...) vuelo_01.csv y trust_curve_01.csv
+            dan "la primera unidad de asignacion no es valida" (tamano 0 con
+            cluster asignado: reservas de sesiones cortadas por un reinicio o
+            al grabar), uno con vinculo cruzado, y telemetria.csv de la 0117
+            (la tarjeta se saco con la placa encendida) "vinculo / tamano no
+            valido": en el PC sale con 0 bytes. ~1 GB ocupado que no es de
+            ningun archivo. Mirar que al liberar las reservas el archivo quede
+            coherente (tamano 0 -> cluster 0) y que tras un CORTE en mitad de
+            la grabacion el PC lea lo grabado (es lo que pasara al aterrizar si
+            se va la corriente). Para limpiarla: chkdsk D: /F como
+            administrador, o formatear.
+[ ] IMPL    VISOR DE LOS DATOS DE LA SD (pedido 2026-10-06, para mas
+            adelante): abrir una carpeta aspid_data_*, resumen del vuelo,
+            graficas con el tiempo comun y las fases, trust curve (empuje,
+            impulso, tiempo de combustion), mapa, actitud en 3D, enlace de
+            radio (cruzando con la carpeta de la estacion). Propuesta: Python
+            con PyQtGraph en tools/visor/.
+[ ] IMPL    REGISTRO SD1, mas ideas (2026-10-06): CAN2 en bruto para poder
+            pasar un vuelo a VUELO.BIN y volver a simularlo; GPS a su ritmo
+            (10 Hz) aparte; interior del EKF (covarianzas, innovaciones); IMU a
+            400 Hz +-2 s alrededor de cada despliegue; indice con CRC de cada
+            archivo; temperatura del micro (sensor interno en ADC3, sin
+            configurar); marca para sincronizar con el video de a bordo.
+[ ] IMPL    REGISTRO SD1: COPIA EN LA SD2 (pedido 2026-10-05, para mas
+            adelante). Antes, pasar App/sd_bench.c a la SD2 y subirla a 20 MHz.
+[ ] REVISAR TRUST CURVE: hoy las IMU llegan a ~200 Hz, asi que media fila de
+            cada dos repite la anterior (columna imuN_nuevas = 0). Cuando la
+            avionica las mande a 400 Hz (ver pendiente de la avionica) cada
+            fila sera una muestra nueva.
+[ ] REVISAR REGISTRO SD1: borrar de la SD1 las carpetas de prueba
+            aspid_data_2000-01-01_* (fecha FALSA de ASPID_DATA_PRUEBA),
+            las aspid_data_sin_fecha_* de las pruebas de la mesa y
+            SDBENCH.TXT.
+[ ] IMPL    REGISTRO SD1, ideas (2026-10-05): bit "grabando / sellada / sin
+            SD / tarjeta perdida" en el paquete de estado para verlo desde
+            tierra antes de lanzar; fecha mandada desde la estacion si no hay
+            GPS; eventos en sesion.txt (cambios de fase, ordenes de despliegue
+            y su respuesta, resets de placas).
+
+[ ] REVISAR GNC EN ERROR TRAS UNA SIMULACION (visto 2026-10-05): ~5 min
+            despues de un SIMULAR RUTA, la consola daba estado ERROR, error
+            0x01, nav OK pero la posicion a ~9 km y la velocidad a ~150 m/s
+            con la placa quieta en la mesa. Al reiniciar el core se fue.
+            Mirar que deja el GNC al terminar la reproduccion (gnc_playback.c)
+            y si vuelve a los sensores reales con el estado limpio.
+            PROBABLE CAUSA: la rampa estaba en 10,04 grados con la placa plana
+            en la mesa. El EKF ve la gravedad 10 grados torcida y la toma por
+            aceleracion horizontal (~1,7 m/s2): en el registro de la prueba de
+            la SD la posicion ya derivaba 150 m en 15 s. Repetir con la rampa
+            en 0 antes de buscar otra cosa.
+            2026-10-05: rampa puesta a 0 / 0 (guardada en las SD). Tras una
+            simulacion el GNC volvio a POWER_ON y alineado; falta mirar un rato
+            largo si vuelve a ERROR.
+
+[ ] PROBAR  GUARDADO DE DATOS EN LA ESTACION (2026-10-04, tools/estacion/
+            grabador.py). Cada vez que se abre crea Escritorio/LEEM_datos/
+            <fecha_hora>/ con crudo/ (todas las tramas en hex), vuelo/ por
+            tramos (corta con 20 s sin paquetes o si el cohete se reinicia),
+            estado/, acuses/, comandos/, simulaciones/sim_NN/ aparte y el
+            registro. Probado en --demo-tierra (ping, modo test, simulacion) y
+            casos raros sin interfaz (simulacion denegada, estados perdidos a
+            mitad de simulacion, reinicio, tramas corruptas). FALTA probarlo
+            con el puente y el cohete de verdad.
+            Ideas para luego: script que regenere las carpetas desde
+            crudo/tramas.csv si cambia un decodificador; avisar si se llena
+            el disco.
+
+[x] RESUELTO EL REGISTRO DE LA ESTACION DEJABA DE PINTARSE A PARTIR DEL
+            EVENTO 400 (2026-10-04): contaba con len() de un deque de 400, que
+            se queda fijo al llenarse. Ahora cuenta Estado.n_eventos.
+
+[x] PROBAR  COMO OYE EL COHETE A TIERRA (2026-10-04; RF grabada y los acuses ya
+            traen RSSI/SNR/df del cohete, visto en la prueba de camaras 2026-10-06). La RF manda ahora en
+            RF_RECEIVED (ICD 6.12) una cabecera con RSSI, SNR y error de
+            frecuencia de cada paquete; el core los devuelve en el acuse (12
+            bytes, antes 8) y la estacion los pinta en PAQUETE CRUDO y en el
+            registro del PING. Core grabado y probado con la RF ANTIGUA (sigue
+            funcionando, acuse de 12 B sin medidas). FALTA GRABAR LA RF
+            (compilada) y comprobar que aparecen las medidas.
+
+---------------------------------------------------------------------------
+GNC v1.5 INTEGRADO (2026-10-07)
+---------------------------------------------------------------------------
+[x] IMPL    GNC v1.5 (entrega generada el 2026-10-06) en third_party/aspid_gnc
+            en lugar de la v1.2. Lo que cambia para App/gnc.c:
+              - Rampa: nav_tun.rail_elev_deg / rail_azim_deg (ya no hay
+                init_euler_rad) y el modelo se alinea SIEMPRE con alabeo 0.
+                gnc.c sigue midiendo el alabeo con la gravedad y GIRA las
+                medidas sobre el eje del cohete para que nav lo vea a 0; las
+                salidas (actitud, aceleracion, giro, sesgos) se devuelven a
+                los ejes de verdad.
+              - nav_cmd: la maquina de estados se lo pasa a nav en el tick
+                siguiente (10 realinear, solo en POWER ON / MANTENIMIENTO;
+                11 reiniciar la covarianza).
+              - Nav deja de usar el barometro por encima de Mach 0,75.
+              - gc_tun de fabrica: apogeo 3000 m, control desde 1200 m, MAIN
+                A 450 m, drogue 0,5 s despues del apogeo.
+            Banco PIL en el PC (el pil_test.c de la placa compilado para el
+            PC): las 72609 filas (el vuelo entero, 181,5 s) SIN UNA SOLA
+            DISCREPANCIA, nav_cmd incluido. En placa: alinea, peor tick
+            1,19 ms de 2,5.
+[x] IMPL    REALINEAR AL CAMBIAR LA RAMPA (resuelve el DECIDIR "CUANDO SE
+            ALINEA EL EKF" de la v1.2, abajo): un angulo o rumbo nuevo por
+            radio con el cohete en tierra (POWER ON / MANTENIMIENTO) realinea
+            en el acto con el comando 10. Probado por radio: 0,50 grados y
+            vuelta a 0, la navegacion vuelve a OK en 0,44 / 0,47 s sin
+            reiniciar. Consola: "Realineado N veces".
+[x] PROBAR  SIMULAR RUTA CON LA v1.5 (2026-10-07), con el VUELO.BIN de 35 s de
+            la v1.2: BOOST, COAST, CONTROL, APOGEO (3008 m) y DROGUE, 1A y 1B
+            mandados (5 ordenes cada uno, sin nada conectado), peor tick
+            1,19 ms. Despues, firmware de vuelo grabado y arranque normal.
+[ ] PROBAR  BANCO PIL v1.5 EN LA PLACA: python tools/pil_csv_to_bin.py
+            <GNC_V1_5/pil> <carpeta> (~28 MB), copiar los 6 .BIN a la raiz de
+            la SD1, PIL_TEST_ENABLE a 1 y arrancar. Tiene que salir CORRECTO
+            en nav, state_machine y gc (en el PC sale).
+[ ] PROBAR  SIMULAR RUTA CON EL VUELO ENTERO DE LA v1.5 (181,5 s: drogue y
+            MAIN): python tools/vuelo_from_pil.py <GNC_V1_5/pil> <carpeta> y
+            copiar VUELO.BIN a la SD1. Con el de 35 s el main no se prueba.
+[ ] DECIDIR MAIN: EL GNC v1.5 LO ABRE A 450 m (gc_tun de fabrica) Y EL MODO DE
+            EMERGENCIA A 400 m (EMERGENCIA_MAIN_M). Igualarlos (que emergencia
+            use gc_tun.main_deploy_alt_agl_m) o dejarlo asi a proposito.
+[ ] REVISAR SIN GPS EN EL BANCO la navegacion horizontal se va en 30-60 s,
+            igual que con la v1.2 (9 m/s y 480 m en 2 min). Sesgo del
+            giroscopo Y de la IMU1 ~0,05 rad/s. Repetir con fix de GPS antes
+            de sacar conclusiones.
+
+---------------------------------------------------------------------------
+GNC v1.2 INTEGRADO (2026-10-04)
+---------------------------------------------------------------------------
+[x] IMPL    GNC v1.2 en third_party/aspid_gnc (nav/, state_machine/, gc/,
+            shared/). App/gnc.c reescrito: nav y maquina de estados a 400 Hz
+            (planificado con el contador de ciclos, recupera hasta 8 ticks de
+            retraso), guiado uno de cada 8 (50 Hz). Barometro (BARO1) como
+            entrada nueva, decimado a 66,7 Hz. rocket_state del tick anterior
+            hacia nav. Estados en constantes GNC_ESTADO_* (CAMBIARON: EN VUELO
+            es el 2, ERROR el 3, ya no hay READY). Aerofreno a 50 Hz, al ritmo
+            del guiado. Probado en placa: alinea, nav OK, 0 ticks perdidos.
+[x] IMPL    RENDIMIENTO: el EKF de la v1.2 tardaba ~10 ms por tick (presupuesto
+            2,5 ms). Arreglado con: codigo del GNC a -O2 (CMakeLists), cache
+            de instrucciones Y DE DATOS encendidas, y la CPU a 400 MHz (antes
+            200) con los buses igual que antes (AHB/AXI 200, APB 100, SD a
+            20 MHz por PLL1Q, FDCAN y ADC por PLL2 sin tocar, USB por HSI48).
+            Ahora: ~0,75 ms de media, 1,2 ms el peor tick. SD, CAN, USB y radio
+            comprobados despues del cambio.
+[ ] REVISAR CACHE DE DATOS ENCENDIDA: cada DMA tiene que limpiar/invalidar sus
+            buffers a mano. Hecho en la SD (sd_card.c) y en los LEDs (leds.c).
+            CUALQUIER DMA NUEVO tiene que hacer lo mismo o leera basura sin
+            ningun error. Ver el comentario en flight_software.c.
+[ ] REVISAR Reloj a 400 MHz: cambiado a mano en Core/Src/main.c y en el .ioc
+            (DIVN1 40, DIVQ1 20, DIVR1 4, HPRE /2). Abrir el .ioc en CubeMX y
+            comprobar que lo acepta y no lo deshace al regenerar.
+[ ] DECIDIR IMU "VIVA" EN VEZ DE "DATO NUEVO" (desviacion de la guia de la
+            entrega, gnc.h). Con data_valid = 1 solo con muestra nueva el
+            alineamiento no terminaba nunca (nuestras IMU llegan a ~193 Hz y
+            un tick vacio pone a cero los 200 seguidos que pide). Ahora la IMU
+            va valida mientras llegue algo en 20 ms, con la ultima muestra.
+            COMENTARLO CON GNC: o lo aceptan, o el modelo tiene que tolerar
+            ticks sin IMU en el alineamiento.
+[ ] PROBAR  LAS IMU A 400 Hz DE VERDAD. Llegan a ~193 Hz cada una (la mitad de
+            los ticks repiten muestra) y el modelo esta pensado para una
+            muestra nueva por tick. Ver por que la avionica no manda las 416 /
+            480 Hz que configura (I2C, bucle?).
+[ ] INFORMAR A GNC: la entrega 1.2 define rt_powd_snf() sin static en nav.c y
+            gc.c, y el enlazado falla. SIGUE IGUAL EN LA 1.5. Apanado sin tocar el codigo generado
+            (CMakeLists compila gc.c con otro nombre). Que lo lleven a shared/.
+[x] IMPL    GRABAR LA AVIONICA (hecho, confirmado 2026-10-06): GPS con dynModel = 8 ("Airborne <4g"), que
+            pide la entrega. Hecho en gps.c y compilado, SIN GRABAR.
+[-] PROBAR  BANCO PIL v1.2 (sustituido por el de la v1.5, arriba): generar los 6 .BIN con
+            python tools/pil_csv_to_bin.py <GNC_V1_2/pil> <carpeta>
+            copiarlos a la raiz de la SD1, PIL_TEST_ENABLE a 1 y arrancar.
+            Tiene que salir CORRECTO en nav, state_machine y gc.
+[x] PROBAR  SIMULAR RUTA CON EL GNC v1.2 (2026-10-04): REPRODUCE LA REFERENCIA
+            DE SIMULINK AL TICK. Fases a 1,10 / 7,00 / 8,42 / 22,30 / 26,44 s,
+            bandera de drogue a 26,46 s, altura maxima 3017,6 m y aerofreno
+            maximo 17,8 %: lo mismo que gc_expected / nav_expected. 0 ticks
+            perdidos, 0 reinicios del EKF, 1A y 1B mandados (5 ordenes cada
+            uno), 1752 tramas al servo sin fallos. Lanzada por radio desde el
+            PC (modo test + simular), como la estacion.
+            DOS FALLOS ARREGLADOS POR EL CAMINO:
+              1. HardFault (UNALIGNED) en el primer paso: el registro nuevo de
+                 VUELO.BIN deja imu2_accel en el byte 33 y se pasaba un
+                 puntero a ese campo empaquetado; el M7 no lee floats
+                 desalineados con la FPU. Era el "cuelgue" al simular. Lo
+                 mismo en pil_test.c. Ahora 0 avisos de compilacion.
+              2. La simulacion se alineaba con la rampa VERTICAL (gnc_init)
+                 y el vuelo grabado salio de una a 84,5 grados: el aerofreno
+                 oscilaba 0-25 %. Nueva gnc_set_rail_attitude(); la
+                 reproduccion la usa con la rampa del vuelo grabado. Es la
+                 misma que tendra que usar el angulo de lanzamiento real.
+            La MPU (zona externa sin acceso) se queda: es lo que recomienda ST
+            con caches; el "sin depurador" de esos cuelgues era un cable.
+[ ] IMPL    Que la actitud de la rampa del vuelo grabado viaje en la cabecera
+            de VUELO.BIN (hoy es una constante en gnc_playback.c).
+[-] PROBAR  SIMULAR RUTA con el VUELO.BIN nuevo (400 Hz, 35 s, despegue a (hecho arriba)
+            ~1,1 s y drogue a ~26,5 s): python tools/vuelo_from_pil.py
+            <GNC_V1_2/pil> <carpeta> y copiar VUELO.BIN a la SD1. El de la
+            v1.1 ya no vale (otra cabecera: lo rechaza y lo dice). Con cargas
+            de prueba en 1A, 1B y 2A.
+[x] DECIDIR (RESUELTO 2026-10-07 con el cerrojo de la rampa de la estacion, arriba del todo) MODO TEST EN LA RAMPA: con la v1.2 no hay READY, el cohete esta en
+            POWER ON hasta que despega, asi que el modo test (y la pirotecnia
+            manual) SE ACEPTAN EN LA RAMPA. Antes READY lo impedia (en la rampa
+            no se sabe que hay en cada canal: podria ser el encendido del
+            motor). Decidir si hace falta otro cerrojo (p. ej. una orden de
+            "en rampa" desde tierra que lo bloquee).
+[x] IMPL    RAMPA AL GNC: ANGULO Y RUMBO (2026-10-04). gnc_set_rampa(desde la
+            vertical, rumbo, alabeo): cabeceo = 90 - angulo, guinada = rumbo
+            (desde el norte geografico), alabeo MEDIDO con el acelerometro
+            mientras se alinea (o dado, GNC_ALABEO_MEDIR = medir). Comando
+            nuevo UPLINK_CMD_RUMBO 0x16, guardado con el angulo en ANGULO.TXT
+            de las dos SD; casilla de rumbo en el panel del angulo de la
+            estacion. La simulacion entra por el mismo camino con la rampa del
+            vuelo grabado (5,4993 / 0 / alabeo 0) y sigue cuadrando al tick con
+            la referencia. Probado en placa: 10 / 90 por radio se guarda y la
+            consola avisa; con 10 guardados y la placa plana NO alinea (10,55
+            grados entre gravedad medida y esperada, lo dice la consola); al
+            volver a 0 / 0 se alinea al momento sin reiniciar.
+            OJO: el alabeo medido es sensible al sesgo del acelerometro con
+            poca inclinacion (5,5 grados -> 21 grados de alabeo con 0,37
+            m/s2). Apenas afecta (giro sobre el eje del cohete), pero si se
+            sabe como queda la placa en la rampa (por los botones de la guia),
+            mejor darlo: hoy no hay comando para eso.
+[x] DECIDIR CUANDO SE ALINEA EL EKF Y SI SE REALINEA DESPUES. RESUELTO CON LA
+            v1.5 (arriba): se realinea en tierra al cambiar la rampa. Antes: una sola vez,
+            en los primeros 0,5 s quieto en POWER_ON tras arrancar (o tras una
+            simulacion). Una rampa que llegue despues se guarda y se aplica en
+            la siguiente alineacion, o sea al reiniciar el core. Opciones: un
+            comando de tierra "alinear ahora" (gnc_init + rampa, solo en tierra
+            y quieto), realinear solo al cambiar la rampa, o no alinear hasta
+            que tierra lo pida (con el cohete ya en la rampa). Ojo: realinear
+            pone a cero la navegacion (posicion, origen) y la maquina de
+            estados.
+[ ] IMPL    MANDAR A TIERRA LOS DATOS DE CALIBRACION DEL EKF: lo que deja el
+            alineamiento (sesgos de acelerometro y giroscopo, actitud de
+            partida, alabeo medido, inclinacion medida y su diferencia con la
+            rampa, presion de referencia del barometro). Hoy solo se ven en la
+            consola USB. En el paquete de estado o en uno nuevo bajo peticion.
+[-] IMPL    ANGULO DE LANZAMIENTO AL GNC: importa mas con la v1.2. El (hecho arriba)
+            alineamiento solo termina si la gravedad medida esta a menos de
+            10 grados de nav_tun.init_euler_rad, y la diferencia la toma como
+            sesgo del acelerometro. Hoy va fijo a 90 (vertical): en una rampa
+            a 17,7 grados NO SE ALINEARIA NUNCA. Hay que pasarle el de
+            lanzamiento.c (elevacion = 90 - angulo) antes de poner el cohete
+            en la rampa, y el azimut.
+[x] DECIDIR Ya no hay ARMAR en la v1.2 (el dataset no trae ningun comando): la
+            diferencia simulacion/vuelo del ARMAR del archivo desaparece.
+
+---------------------------------------------------------------------------
+REVISION A FONDO 2026-10-02 (todas las placas, vuelo y simulacion)
+Ordenado por gravedad. Lo de arriba hay que arreglarlo antes de poner cargas.
+---------------------------------------------------------------------------
+[x] IMPL    !!! POWER DISPARA LOS CUATRO PIROTECNICOS EN CADA ARRANQUE.
+            HECHO 2026-10-02: la llamada queda detras de PYRO_PRUEBA_ARRANQUE
+            (Drivers/Pyro/pyro.h, a 0). Compilado y comprobado en el binario
+            (ninguna llamada a AllPyroCheck), GRABADO (confirmado por el usuario 2026-10-06).
+            power_g4_v0/Core/Src/main.c:125 llama a AllPyroCheck() en cuanto
+            llega el primer wake up: enciende 1A, 1B, 2A y 2B en cascada (al
+            final los cuatro a la vez, 1 s). Con cargas puestas, encender el
+            cohete las quema todas. Y como el core manda el wake up para
+            siempre, un reinicio de power en vuelo (bajon de tension) las
+            quemaria ~2 s despues. Ademas son 5 s de HAL_Delay sin atender CAN.
+            Quitar la llamada (dejar AllPyroCheck solo para el banco, detras de
+            un #define a 0).
+
+[x] IMPL    PRUEBAS DE AEROFRENO DESDE TIERRA (2026-10-03). Comandos 0x14
+            (prueba: 3 x fuera 0,5 s / dentro 0,5 s, rampa de 2 s arriba y
+            2 s abajo) y 0x15 (extension 0..100 %), con acuse, en modo test,
+            en tierra y sin simular. La prueba lleva numero para que un
+            reintento tardio no la repita. Botones en el panel de pruebas.
+            Probado contra el simulador de la estacion; el core grabado.
+            Y la EXTENSION pasa ahora al servo por la cinematica de la
+            biela-manivela (CinematicaBielaManivela.pdf, App/airbrake.c),
+            tambien la del GNC: antes el 100 % iba al byte 255 = 180 grados
+            y el mecanismo solo da 109.
+[x] IMPL    POWER: EL CANAL 2B ALIMENTA EL SERVO (2026-10-04). Encendido al
+            arrancar (tras el wake up, con los 7 V de los pares) y siempre;
+            un CMD_PYRO_FIRE de 2B se ignora. PYRO_2B_ES_SERVO en
+            App/pyro_control.h. GRABADO (confirmado por el usuario 2026-10-06).
+            OJO: el servo recibe los 7 V del par 2: comprobar que lo aguanta
+            (muchos son de 4,8-6 V) y la corriente que da ese canal. El boton
+            2B del panel de pruebas ya no hace nada.
+[x] PROBAR  EXTREMOS DEL SERVO MEDIDOS (2026-10-04): recogido con el servo a
+            90 grados (byte 128) y fuera a 10 grados (byte 14), en la escala
+            0..180 = 500..2500 us. Son 80 grados de mando para los 109 de
+            manivela del PDF: el servo no da 180 grados reales. airbrake.c usa
+            los dos extremos y reparte la cinematica entre ellos. FALTA ver
+            que el 50 % de carrera cae de verdad en la mitad del recorrido
+            (si no, el servo no es lineal y habria que medir mas puntos).
+[-] PROBAR  AEROFRENO DE VERDAD, CON CUIDADO LA PRIMERA VEZ. (sustituida por la anterior) Los datos del servo
+            de App/airbrake.h son SUPUESTOS: 180 grados entre 500 y 2500 us,
+            recogido con el servo a 150 grados (2167 us, byte 212) y sale al
+            BAJAR el pulso (cambiado el 2026-10-04: antes 0 y luego 180). Con
+            eso el todo fuera queda en 41 grados, byte 58 (956 us). Si el servo es de 270 grados, si el
+            brazo se monto en otra posicion o si gira al reves, ira a otro
+            sitio y puede ir contra el tope. Antes de PROBAR AEROFRENO:
+              1. ENVIAR EXTENSION con 0 y mirar que el mecanismo esta recogido.
+              2. Subir poco a poco (10, 20...) mirando que sale y que no fuerza.
+              3. Con 100, medir la carrera (deberian ser 31,49 mm) y ajustar
+                 AIRBRAKE_SERVO_GRADOS / _US_RECOGIDO / _SENTIDO si no cuadra.
+            La consola del core dice el angulo y el byte que se manda.
+[x] DECIDIR (resuelto segun el usuario 2026-10-06) QUE SIGNIFICA EL 0..1 DEL GNC. airbrake.c lo toma como fraccion de
+            la CARRERA del actuador. Pero GuidanceControl saca tambien
+            airbrake_deg = cmd * 45, como si fuera un angulo de panel de 0 a
+            45 grados. Confirmar con los del GNC si el mando es carrera, angulo
+            de panel o area frontal: si no es carrera, hay que meter la
+            relacion que toque antes de la cinematica.
+
+[x] IMPL    !!! EN VUELO REAL EL GNC NO USA EL GPS (y simulando si).
+            HECHO 2026-10-02: la calidad del fix (tipo y satelites) sale ahora
+            de NAV-PVT, en convencion UBX: gnc_on_gps_pvt(). La posicion sigue
+            saliendo del GGA, sin su fix_quality. Si NAV-PVT deja de llegar
+            >1 s, el fix caduca a 0. gnc_on_gps_velocity() (RMC, sin vertical)
+            quitada. La simulacion pasa por las mismas dos funciones. La
+            consola dice en la linea del GNC el fix que ve el EKF y si lo usa.
+            Grabado en el core: sin GPS en el banco da "fix 0D (el EKF NO usa
+            el GPS)", como debe. FALTA: verlo con fix de verdad (cielo abierto:
+            tiene que salir "fix 3D (el EKF lo usa)") y repetir una simulacion
+            para confirmar que sigue igual que antes.
+            Navigation.c solo acepta el GNSS con fix_type >= 3 (convencion UBX:
+            3 = fix 3D). gnc.c le pasa el fix_quality del GGA, que es NMEA:
+            con fix normal vale 1 (2 con SBAS). Resultado: nunca fija el
+            origen, nunca corrige con GPS y el modo "solo GNSS" del descenso
+            no entra nunca: el EKF vuela solo con la IMU. VUELO.BIN trae el
+            fix_type del modelo (3), asi que la simulacion SI usa el GPS: otra
+            diferencia simulacion/vuelo. Arreglo: usar el fixType de NAV-PVT
+            (0x108, UBX, ya llega decodificado en sensor_board.c) para
+            gnss.fix_type.
+[x] IMPL    La velocidad de NAV-PVT entra en el EKF aunque no haya fix:
+            HECHO 2026-10-02 con lo anterior: sin gnssFixOK no se toca la
+            velocidad y el fix cuenta como 0.
+            _decode_gps_pvt() lee 'valid' (gnssFixOK) y fix_type pero llama a
+            gnc_on_gps_velocity_ned() sin mirarlos. Va junto con lo anterior.
+
+[ ] IMPL    !!! CALIBRACION DE LA AVIONICA CON 0 GRADOS SIEMPRE. El core pide
+            sys_avionics_calibrate(&state, 0.0f) al arrancar. La avionica resta
+            a cada lectura (media - gravedad esperada para ese angulo): con el
+            cohete a 17,7 grados en la rampa se come ~3 m/s2 de gravedad como
+            "sesgo" y los resta para siempre; encendido tumbado, 1 g entero.
+            Hay que calibrar con el angulo de rampa (lanzamiento_grados()) y en
+            la rampa, no al encender (orden desde tierra?). Los offsets ademas
+            son solo RAM: si la avionica se reinicia, se pierden. Revisar
+            tambien hacia que eje "inclina" la avionica (calibration.c).
+            2026-10-02: se deja pendiente a proposito, falta decidir cuando y
+            como se calibra.
+            >>> Se resuelve con la entrada siguiente: QUITAR la calibracion.
+
+[ ] IMPL    QUITAR LA CALIBRACION DE LA AVIONICA (decidido 2026-10-02): el GNC
+            HECHO EN PARTE 2026-10-04: el core YA NO MANDA la orden de
+            calibrar (flight_software.c), asi que la avionica nunca calibra
+            y manda las IMU en bruto. El codigo de calibracion sigue en las
+            dos placas y en el ICD sin usarse; quitarlo con la lista de abajo.
+            la hace solo. El EKF es de 15 estados y estima los sesgos de
+            acelerometro y giroscopo durante el alineamiento, con el cohete
+            quieto. Calibrar ademas en la avionica es restar dos veces, y con
+            el angulo mal (siempre 0, ver la entrada anterior) mete un error
+            que el EKF ya no puede separar de la actitud. Quitarla arregla eso,
+            los 2 s de bucle bloqueado y la perdida de offsets si la avionica
+            se reinicia. Lo que hay que tocar:
+              - avionica: App/calibration.c/.h fuera; en main.c la llamada a
+                Calibration_Update(); en sensorsI2c.c/.h los offsets que se
+                restan a las IMU (SensorsI2c_SetImuOffsets); en canNode.c/.h la
+                recepcion de CMD_AVIONICS_CALIBRATE y el envio de
+                AVIONICS_CALIBRATION.
+              - core: la llamada sys_avionics_calibrate(&state, 0.0f) de
+                flight_software.c; sys_avionics.c/.h y los campos de
+                calibracion de sys_utilities.h; la seccion CALIBRACION AVIONICA
+                de debug_console.c; el bit 0x40 del byte 3 del paquete de
+                estado (status_packet.c).
+              - estacion: paquete.py (calibracion_hecha), paneles.py (el texto
+                "calibracion hecha"), el simulador de estacion.py (byte 3) y
+                PROTOCOLO.md. El bit 0x40 se puede dejar reservado a 0 para no
+                cambiar el formato del paquete.
+              - can_protocol: ICD 6.8 CMD_AVIONICS_CALIBRATE (0x131) y 6.9
+                AVIONICS_CALIBRATION (0x231), y sus IDs en can_ids.h. Marcarlos
+                como retirados (no reutilizar los IDs) y copiar el submodule a
+                las cuatro placas.
+            OJO, lo unico que se pierde: la presion base de los barometros
+            (6.9 la manda). Hoy no la usa nadie (el modelo no tiene
+            barometro), pero si algun dia se quiere altura barometrica habra
+            que medirla en otro sitio.
+            Comprobar despues: con la placa quieta, que el GNC siga dando nav OK
+            y la actitud bien sin los offsets de la avionica.
+
+[x] IMPL    HECHO Y GRABADO 2026-10-06 (en reposo sigue dando 9,90 m/s2, la
+            conversion cuadra). DECIDIDO: IMU2 (LSM6DSV32X) a +-16 g en la avionica, como
+            la IMU1, para que el EKF nunca mezcle una IMU saturada (no se
+            espera pasar de 16 g). En imu2.c: LSM6DSV32X_8g -> LSM6DSV32X_16g
+            y from_fs8_to_mg -> from_fs16_to_mg (el giro se queda). La core
+            no cambia: recibe m/s2. Comprobar ~1 g en reposo tras grabar.
+            Lo de antes: LA IMU DE ALTA G ESTA A +-8 g (imu2.c), y la de baja a +-16 g.
+            El modelo mezcla hacia la de ALTA G a partir de 12 g y la usa sola
+            si la de baja pasa de 15,7 g: da por hecho que la de alta mide mas.
+            Con +-8 g, por encima de 12 g el GNC mezcla una IMU saturada y
+            subestima la aceleracion del empuje. Si el motor pasa de ~8 g,
+            poner la LSM6DSV32X a 32 g / 4000 dps. El comentario de imu2.c dice
+            que se dejo asi a proposito: decidirlo sabiendo esto.
+
+[x] IMPL    (HECHO 2026-10-07, arriba del todo) !!! NINGUNA PLACA SALE DE BUS-OFF. En el FDCAN de STM32, tras un
+            bus-off el periferico se queda en INIT hasta que el software lo
+            saca, y ninguna de las cuatro lo hace. Un mal contacto o una racha
+            de errores deja a esa placa sorda para siempre: power sin
+            pirotecnia, RF sin telemetria, avionica sin servo. Vigilar PSR.BO
+            en el bucle y limpiar CCCR.INIT (o Stop/Start) en las cuatro.
+
+[x] DECIDIR (HECHO 2026-10-07, arriba del todo) !!! SIN WATCHDOG EN NINGUNA PLACA, y Error_Handler/HardFault se quedan
+            en un bucle infinito. Pero en el CORE un watchdog hoy seria peor:
+            tras el reinicio el GNC vuelve a POWER_ON y nunca despliega (falta
+            la persistencia del estado de vuelo). Hacer las dos cosas juntas.
+            En power/avionica/RF si se puede poner ya (el core las despierta).
+
+[ ] REVISAR power: OUT_11V_1..4_EN no se encienden nunca (gpio.c las deja a 0 y
+            nadie las toca). Si algo cuelga de esas salidas (el servo?), no
+            tiene alimentacion.
+[ ] DECIDIR power: Pyro1/Pyro2 (7 V de cada par) se encienden al arrancar y se
+            quedan asi: no hay armado. La unica barrera es el MOSFET de canal.
+[ ] DECIDIR power: AutoOff usa 0 como "apagado": un disparo justo en el tick 0
+            (o al dar la vuelta HAL_GetTick a los 49 dias) no se apagaria.
+
+[ ] IMPL    avionica: Calibration_Update() bloquea 2 s el bucle (sin telemetria
+            ni servo). Hoy solo al arrancar, pero un reinicio del core en vuelo
+            la volveria a pedir y dejaria al GNC 2 s sin IMU.
+[ ] DECIDIR avionica: si se pierde el enlace con el core el servo se queda en la
+            ultima posicion (canCommandLinkAlive se calcula pero no se usa). Con
+            el core muerto y el aerofreno fuera, se queda fuera bajo paracaidas.
+[ ] REVISAR avionica: las IMU llegan al core a ~193 Hz cada una (81652 tramas en
+            423 s), no a 416/480 Hz como dicen imu.c e imu2.c. El GNC recibe 2
+            muestras por paso, no 4-5. Ver si es el I2C o el bucle.
+
+[ ] IMPL    RF: si la radio falla al arrancar (radio_beacon_init) o se cuelga,
+            no se reconfigura nunca: telemetria perdida el resto del vuelo.
+            Reintentar sx1262_configure() tras N fallos seguidos.
+
+[ ] IMPL    core, paquete de estado: los bits de placas (byte 3) son "contesto
+            alguna vez al wake up", no "esta viva": si una placa muere despues,
+            tierra la sigue viendo bien. Guardar el instante del ultimo ACK del
+            latido (cada 2 s) y darla por muerta si pasan >5 s.
+[ ] IMPL    core: los 1615 desbordes de CAN2 del arranque (storage_init, el
+            HAL_Delay de sys_init y la espera del wake up bloquean con la
+            avionica mandando 837 tramas/s) dejan el byte 18 del paquete de
+            estado SIEMPRE a 255: tierra ve errores en CAN2 que no lo son.
+            Poner a cero las estadisticas al entrar en el bucle, o vaciar CAN2
+            durante el arranque. La placa de sensores marca "resets 3" desde el
+            arranque, estable: probablemente del mismo sitio.
+[ ] IMPL    core: despliegue cuenta "ordenes aceptadas por power", pero
+            _pyro_fire() solo sabe que se ENCOLO la trama (ICD 6.3: power no
+            confirma). Cambiar el texto o anadir confirmacion en el ICD.
+[x] DECIDIR core: el byte 21 del paquete de vuelo manda lo que PIDE el GNC
+            (actuator_cmd), no lo que salio al servo (fuera de EN VUELO es 0).
+            Mandar airbrake_last_command()?
+            HECHO 2026-10-03: manda la extension que se manda al servo, para
+            que las pruebas de aerofreno se vean desde tierra.
+[ ] REVISAR core: el comentario del filtro de CAN2 en can_driver.c dice 0x101-0x105;
+            el filtro real va de 0x101 a 0x108 (bien). Solo el comentario.
+[ ] DECIDIR GNC: MANTENIMIENTO (estado 1) no tiene salida a EN VUELO: si se
+            despegara en ese estado no habria despliegue. Hoy nada lo pone ahi
+            en vuelo; tenerlo en cuenta al hacer los comandos de tierra.
+[ ] DECIDIR GNC: el modelo no tiene barometro. Con el GPS perdido no hay ninguna
+            medida absoluta de altura.
+[ ] IMPL    estacion/puente: total = len + 5 en uint8_t desborda con paquetes
+            ajenos de mas de 250 B. Sin importancia con los nuestros (<= 32 B).
+
+Revisado y BIEN (para no repetirlo): secuencia POWER_ON -> EN VUELO por
+aceleracion (6 pasos), despliegue drogue 1A+1B / main 2A con estado propio por
+canal, aerofreno recogido fuera de EN VUELO y retirada a 4/s tras el apogeo,
+decodificadores de la estacion byte a byte, uplink (modo test, doble cerrojo de
+pirotecnia), consola USB sin bloqueo, I2C de la avionica con recuperacion,
+timestamps de la avionica (TIM5, separado del servo en TIM2), tamanos de trama
+CAN2 (todas <= 32 B), memoria de mensajes del FDCAN del core, RF con TX acotada.
+
+
+---------------------------------------------------------------------------
+PROTOCOLO CAN1 (third_party/can_protocol)
+---------------------------------------------------------------------------
+[ ] IMPL    Commitear el clon del protocolo (ICD 0.2 completo: wake up, pirotecnia,
+            POWER_RAILS, calibracion, CMD_RF_TRANSMIT, INIT_STATUS), subirlo y
+            actualizar el submodule en las 4 placas. can_ids.h ya tiene TODOS los IDs.
+[x] IMPL    Submodule can_protocol actualizado en las 4 placas y can_ids_pending.h
+            borrado: todas usan ya can_protocol/can_ids.h.
+[ ] DECIDIR Que hace una placa si la version del wake up no es compatible
+            (ahora: no responde y sigue esperando).
+[x] DECIDIR Placa que arranca despues de la ventana de 5 s del wake up: el core sigue
+            reenviando CMD_WAKE_UP a 1 Hz mientras falte alguna placa (sys_update), y
+            todas las placas responden a cada wake up, no solo al primero.
+[ ] IMPL    APLAZADO: heartbeat por placa (clase 6 del ICD, sin definir). Hace falta
+            para detectar una placa que se reinicia cuando el core ya las daba a
+            todas por despiertas: en ese caso no se reenvia el wake up.
+[ ] DECIDIR Longitud maxima de datos (ICD dice 32 bytes, pendiente de confirmar).
+[ ] DECIDIR Retransmision automatica por nodo (avionica la tiene desactivada en FDCAN1).
+[ ] DECIDIR Conector y pines del bus, que nodos llevan la terminacion de 120 ohm,
+            longitud total del bus.
+
+
+---------------------------------------------------------------------------
+CORE (core_h7_v0)
+---------------------------------------------------------------------------
+[ ] PROBAR  Cadena POWER_RAILS completa: core pide 0x122 a 1 Hz, power responde 0x222,
+            state.power_rails se actualiza.
+[ ] REVISAR MEMORIAS FLASH: APARCADO el 2026-09-28 por un problema de hardware sin
+            resolver. Todo lo averiguado, para no repetirlo:
+            La placa lleva DOS W25N01GVZEIT (IC1 e IC2), 1 Gbit / 128 MB cada una,
+            compartiendo bus y con chip select separado. En el .ioc estan en
+            OCTOSPI2: IO0-IO3 en PF0-PF3 y CLK en PF4.
+
+            BLOQUEO: en el esquematico el pin 8 (VCC) va a +5 V, y el datasheet no
+            deja ninguna rendija:
+              - rango de operacion      2,7 a 3,6 V
+              - MAXIMO ABSOLUTO         -0,6 a +4,6 V ("puede causar dano
+                permanente" por encima)
+              - la tension esta hasta en el nombre de la pieza: la "V" de
+                W25N01G-V- significa 2,7 a 3,6 V
+            O sea que 5 V esta 0,4 V por encima del maximo absoluto, no solo fuera
+            del rango de trabajo. Lo unico que se permite por encima de VCC son
+            transitorios de menos de 20 ns en pines sueltos (VIOT), que no aplica a
+            una alimentacion continua.
+            Y aunque sobreviviera, no funcionaria: VIH = VCC x 0,7, o sea 3,5 V con
+            VCC a 5, y el H723 saca 3,3 como mucho; las entradas CS/CLK/DI no verian
+            nivel alto. En sentido contrario, sus salidas irian a ~5 V contra
+            PF0-PF4.
+            PRIMER PASO cuando se retome: MEDIR EL PIN 8. O la etiqueta del
+            esquematico esta mal y ahi hay 3V3 (lo mas probable si la placa esta
+            fabricada), o hay que reformar esa alimentacion al rail de 3V3. Si han
+            estado encendidas a 5 V pueden estar ya danadas.
+
+            ADEMAS, lo que falta para implementarlo:
+              - los pines de CHIP SELECT no estan ni en el .ioc ni en main.h (las
+                redes se llaman SPI_FLASH_1_NCS1 y SPI_FLASH_2_NCS1). Hay que
+                sacarlos del esquematico.
+              - CubeMX no ha generado el codigo del OCTOSPI (no hay octospi.c);
+                habria que escribirlo a mano, como TIM15 del zumbador y TIM4 de los
+                LEDs, y reconciliarlo luego.
+              - OJO: son NAND SPI, NO NOR tipo W25Q. Se programa por paginas de
+                2048+64 B, se borra por bloques de 128 KB, llevan ECC interno y
+                VIENEN DE FABRICA CON HASTA 20 BLOQUES MALOS marcados (un byte
+                distinto de FFh en el byte 0 de la pagina 0 del bloque). Hay que
+                escanearlos y saltarlos; no se puede dar por bueno el bloque 0.
+              - Plan propuesto: paso 1, leer el JEDEC ID (comando 9Fh, debe
+                devolver EF AA 21). No escribe nada y confirma alimentacion,
+                niveles, bus y los dos chip select de una vez. Paso 2, lectura y
+                escritura respetando los bloques malos, con verificacion y
+                resultado en la consola USB, como se hizo con las tarjetas SD.
+[ ] REVISAR Abrir el .ioc en CubeMX y comprobar que acepta los cambios hechos a mano
+            (FDCAN1 RX FIFO 16x32, 3 filtros, IRQ FDCAN1_IT0, FDCAN2 MessageRAMOffset=256).
+[ ] DECIDIR HAL_Delay(1000) al inicio de sys_init: se puede quitar (el wake up se repite 5 s).
+[x] IMPL    Quitar las tramas de prueba de flight_software.c cuando haya mensajes reales:
+            CAN1 0x710 (contador debug) y CAN2 0x200 (servo 0/255).
+            HECHO 2026-10-01: quitadas las dos. Nadie leia la 0x710.
+[ ] IMPL    Usar sensor_board_get_data() (log, reenvio...), ahora hay un TODO.
+[x] IMPL    GNC ASPID (Simulink) en el core: third_party/aspid_gnc (Navigation EKF,
+            StateMachine y GuidanceControl) + App/gnc.c, a 100 Hz con la media de los
+            sensores recibidos por CAN2 entre ejecuciones. En la consola: modo, fase,
+            posicion/velocidad NED, actitud, apogeo previsto y tiempo de ejecucion.
+[ ] PROBAR  GNC en placa: que el EKF converja (nav OK), que la actitud sea coherente con
+            como este puesta la placa y ver cuanto tarda cada paso (max_step_us < 10000).
+[x] DECIDIR Ejes de la IMU1: esta montada girada 180 grados en Z respecto a la IMU2. Se
+            corrige en la avionica, en el driver (Drivers/Sensors/imu.c, IMU_MOUNT_X/Y):
+            asi la telemetria, la calibracion y el GNC ven las dos IMUs igual.
+[ ] PROBAR  Con la placa quieta y en horizontal, que las dos IMUs den la misma aceleracion
+            (~9,81 en el mismo eje y con el mismo signo) en la consola del core.
+[x] IMPL    !!! EN VUELO NORMAL EL AEROFRENO NO SE MUEVE (revisado 2026-10-01).
+            HECHO 2026-10-01 (compilado, SIN PROBAR EN PLACA: ver abajo
+            "PROBAR AEROFRENO EN EL FLUJO NORMAL"). airbrake_update() en el
+            bucle despues de despliegue_update(): una trama por paso del GNC,
+            el mando del GNC si rocket_state == 3 (EN VUELO) y 0 en cualquier
+            otro estado. Es lo unico que manda la 0x200; airbrake_command(),
+            airbrake_retract() y airbrake_in_use() ya no existen. La trama de
+            prueba 0/255 quitada.
+            airbrake_command() SOLO se llama desde gnc_playback.c: el GNC
+            calcula el mando en vuelo pero nadie se lo pasa al servo. Solo lo
+            mueve la simulacion. Hay que hacerlo igual que el despliegue: en el
+            flujo normal, despues del GNC, y que la simulacion pase por el
+            MISMO sitio (hoy la simulacion lo hace por su cuenta en _paso()).
+            Y A LA VEZ quitar la TRAMA DE PRUEBA de flight_software.c
+            (CAN2_TX_TEST_ID 0x200) que mueve el servo de 0 a 255 cada poco:
+            hoy solo la calla airbrake_in_use(), o sea solo mientras se
+            simula. En vuelo estaria moviendo el aerofreno al azar.
+            Antes de volar, imprescindible. Va junto con el mapeo servo ->
+            angulo efectivo, que tambien esta pendiente.
+[x] IMPL    Aerofreno: pasar gc->actuator_cmd (0..1) al servo de la avionica por CAN2
+            (GNC_USE_ACTUATORS en App/gnc.h). De momento se calcula pero no se usa.
+            HECHO 2026-10-01: airbrake_update(). GNC_USE_ACTUATORS quitado (no
+            lo leia nadie y decia lo contrario de lo que pasa).
+
+[x] IMPL    SIMULACION Y VUELO POR EL MISMO CODIGO (2026-10-01). El fallo del
+            aerofreno venia de que la simulacion tenia su propio camino. Ahora
+            gnc_playback.c solo hace dos cosas propias: meter las muestras del
+            archivo (por gnc_on_imu1/imu2/gps, las mismas que sensor_board.c)
+            y escribir el informe. El resto es el bucle de vuelo:
+              - el paso lo da SIEMPRE gnc_update(). gnc_step_now() ya no existe
+                (era la puerta trasera). Simulando, gnc_update() da un paso
+                por registro cuando la reproduccion avisa
+                (gnc_replay_muestra_lista), en vez de por el reloj.
+              - despliegue_update() y airbrake_update() no saben si se simula.
+              - la reproduccion va en el bucle antes de gnc_update(), en el
+                sitio de los sensores. Un registro por vuelta como mucho.
+              - el modo de arranque bloqueante (gnc_playback_run, con su
+                propio bucle y sin radio) quitado: GNC_PLAYBACK_ENABLE ahora
+                hace gnc_playback_start() y corre en el bucle como SIMULAR RUTA.
+                GNC_PLAYBACK_REALTIME quitado (siempre a ritmo real).
+              - al acabar ya no se "recoge el aerofreno" a mano: gnc_init()
+                deja el GNC en POWER_ON y airbrake_update() manda 0.
+
+[ ] PROBAR  AEROFRENO EN EL FLUJO NORMAL Y SIMULACION TRAS UNIFICAR (sin
+            hacer: el ST-Link estaba en una G4 al compilarlo). Grabar el core
+            (ID 0x483) y comprobar:
+              1. En reposo la consola dice "Aerofreno 0.0 % (servo 0/255)
+                 recogido (solo sale EN VUELO)" y las ordenes suben a ~100/s.
+                 El servo ya NO se mueve 0 <-> 255 cada segundo.
+              2. SIMULAR RUTA (con cargas de prueba en 1A/1B): misma secuencia
+                 que antes (READY ~3 s, EN VUELO ~5 s), el servo sale en
+                 COAST con control y en el resumen "Ordenes al servo" ~21000,
+                 0 sin enviar. Comparar VUELOLOG.CSV con uno de antes: con un
+                 registro = un paso deberia salir igual.
+              3. Que la radio siga a 15 Hz durante la simulacion.
+              4. Al acabar, servo a 0 y GNC en POWER_ON.
+
+[ ] REVISAR DIFERENCIAS QUE QUEDAN ENTRE SIMULACION Y VUELO (2026-10-01).
+            Repasadas una a una; las que quedan son estas:
+              a) EL ARMAR DEL ARCHIVO. VUELO.BIN trae un comando 3 (ARMAR) a
+                 los ~3 s y la reproduccion lo mete con gnc_command(). En vuelo
+                 NO hay forma de armar (ningun camino llama a gnc_command), asi
+                 que el cohete real se queda en POWER_ON y solo sale detectando
+                 el despegue. LA SIMULACION PRUEBA UN CAMINO (POWER_ON -> READY
+                 -> EN VUELO) QUE EL VUELO NO RECORRE. Opciones: ignorar los
+                 comandos del archivo hasta que exista ARMAR por radio, o hacer
+                 ya ese comando de uplink y que la simulacion lo espere de
+                 tierra igual que el vuelo. DECIDIR. Ver "Comandos de
+                 telemetria del GNC".
+              b) Ritmo del GNC: en vuelo, cada paso promedia las muestras que
+                 hayan llegado en 10 ms (4-5 por IMU, a veces 0 o 2 del GPS) y
+                 puede saltarse pasos (overruns). Simulando, un registro = un
+                 paso exacto. Es a proposito (repetible y comparable con
+                 Simulink), pero no prueba el promediado ni los saltos.
+              c) La velocidad del GPS: en el archivo es velocidad + rumbo +
+                 vertical, se reconstruye NED en gnc_playback.c. En vuelo llega
+                 NED directa de CAN2. Misma funcion del GNC, distinto origen.
+              d) Radio: simulando se manda un paquete de estado por segundo
+                 (uplink.c, _vigilar_simulacion) que en vuelo no sale. Quita
+                 algo de hueco a los paquetes de vuelo.
+              e) Registro: VUELOLOG.CSV/VUELORES.TXT solo existen simulando.
+                 Cuando se haga el registro de vuelo en la SD, que sea UNO y
+                 que la simulacion lo use tal cual en vez del suyo.
+              f) Ordenes de tierra bloqueadas simulando (modo test,
+                 pirotecnicos manuales, angulo de rampa): son seguridad y no
+                 tocan el GNC ni los actuadores; se quedan.
+[x] IMPL    Pirotecnia del GNC (drogue/main) hacia la power. Ahora se ignora a proposito.
+            HECHO 2026-10-01: App/despliegue.c (drogue -> 1A, main -> 1B).
+            CAMBIADO 2026-10-01: drogue -> 1A y 1B A LA VEZ, main -> 2A, cada
+            canal con su propio canal_t (compartirlo dejaba 1B sin encender).
+            Falta probarlo con cargas de prueba en los tres canales.
+[ ] IMPL    Comandos de telemetria del GNC (ARM, DISARM, ENTER_MAINT, SET_AIRBRAKE...):
+            hoy cmd_valid siempre 0, asi que el cohete se queda en POWER_ON y no llega a
+            READY. Haria falta mandarlos desde tierra (radio) o desde la consola USB.
+[x] IMPL    Banco PIL del GNC en la placa: App/pil_test.c, que inyecta los vectores
+            desde la SD1 a los tres modelos, compara con las salidas esperadas y
+            deja los resultados en la tarjeta. Se activa con PIL_TEST_ENABLE en
+            App/pil_test.h (ahora a 1; poner a 0 para volar). Probado sin datos en
+            la tarjeta: avisa de lo que falta y sigue sin colgarse.
+            Tambien nuevo: App/storage_stream.c, acceso a archivos por trozos
+            (storage.h solo sabia de archivo entero), que hara falta para el
+            registro de vuelo.
+[x] PROBAR  Banco PIL, primera ejecucion completa (2026-09-23), 21001 pasos en 187 s:
+            StateMachine y GuidanceControl EXACTOS (0 diferencias, peor caso 0.0000
+            de la tolerancia), comprobado por la placa y otra vez en el PC contra
+            los CSV originales. Es la primera vez que se ejercitan: el vuelo de 210 s
+            incluye despegue, apogeo y aterrizaje, que en el banco no se pueden
+            provocar. Que dos de los tres modelos salgan exactos demuestra ademas que
+            el formato binario, el orden de campos y la comparacion estan bien.
+            Navigation diverge en el paso 199, justo donde el EKF termina su
+            alineamiento, por lo ya dicho: el banco heredaba nav_tun.init_euler_rad
+            a 90 grados y los vectores se generaron con los 84,5 de fabrica. El
+            cuaternion esperado es [0,740218 0 0,672367 0] y el nuestro seria
+            [0,707107 0 0,707107 0]: 33 veces la tolerancia. Corregido en pil_test.c.
+[x] REVISAR Bug propio encontrado con el CSV de salida: se usaba el valor devuelto
+            por snprintf (los caracteres que HABRIA escrito) para avanzar el indice,
+            asi que al no caber una fila de Navigation en el buffer de 320 B se
+            escribia memoria de al lado en el archivo (bytes nulos y basura en
+            PILNAVO.CSV). Corregido con _append() y buffer de 768 B. No afectaba al
+            veredicto, que se calcula en RAM sobre los valores buenos.
+[ ] PROBAR  Repetir el banco con las dos correcciones: Navigation deberia pasar.
+            PIL_TEST_ENABLE esta ahora a 0 para que no se sume a los 210 s de la
+            reproduccion en cada arranque; ponerlo a 1 para repetirlo.
+[x] IMPL    Reproduccion de vuelo (App/gnc_playback.c): lee VUELO.BIN de la SD1,
+            mete las muestras por la cadena COMPLETA (gnc_on_imu1/2, gnc_on_gps_*,
+            con el giro de ejes y el promediado) y manda el aerofreno AL SERVO
+            real por CAN2 0x200. A diferencia del PIL, no compara contra nada, asi
+            que sigue valiendo cuando el GNC cambie. Deja VUELOLOG.CSV (una fila
+            por paso) y VUELORES.TXT (resumen) en la tarjeta.
+            VUELO.BIN guarda las muestras EN EJES DE PLACA y el GPS en los enteros
+            del ICD, o sea tal y como las manda la avionica: el dia que se grabe un
+            vuelo real, el archivo entra sin tocar nada.
+            Se prepara con tools/vuelo_from_pil.py (73 B/registro, 1,46 MB, GPS a
+            8,5 Hz efectivos). Arranca solo si existe el archivo Y GNC_PLAYBACK_ENABLE
+            esta a 1: las dos condiciones, para que un archivo olvidado en la SD no
+            haga que el cohete reproduzca un vuelo en vez de volar.
+[x] IMPL    App/airbrake.c: mando del aerofreno al servo de la avionica (CAN2 0x200,
+            0..1 escalado a 0..255, pulso de 0,5 a 2,5 ms en PB10). La trama de
+            prueba de servo de flight_software se calla en cuanto el aerofreno manda
+            algo, que compartian ID. Visible en la consola USB.
+[x] PROBAR  Reproduccion de vuelo, primera ejecucion (2026-09-23): arranca bien, se
+            arma con el comando 3 en t=3 s, detecta despegue en 5,08 s y fin de
+            combustion en 11,02 (la referencia da 5,08 y 10,99), pero luego declara
+            APOGEO en 11,71 s en vez de 28,58 y NUNCA entra en COAST con control, asi
+            que el aerofreno no llega a salir y el servo no se mueve.
+[x] REVISAR CAUSA, y es un fallo de diseno que habria afectado a un vuelo real:
+            gnc_on_gps_velocity() metia vel_ned[2] = 0 porque la trama de GPS de CAN2
+            sale de NMEA RMC, que solo da velocidad sobre el suelo y rumbo. Al EKF se
+            le estaba diciendo 8,5 veces por segundo que no subia, mientras subia a
+            280 m/s. Leido en vivo de la placa: velocidad vertical 0,00 EXACTO y
+            altura estancada en 692 m cuando la referencia llega a 3547.
+            Arreglado en gnc.c: si no se conoce la vertical se le pasa al EKF su
+            propia estimacion, asi la innovacion de ese eje es cero y la medida no
+            aporta nada, en vez de arrastrarlo. Anadido gnc_on_gps_velocity_ned()
+            para cuando el receptor de la velocidad entera.
+[x] IMPL    Velocidad vertical del GPS, el arreglo de verdad (2026-09-23):
+            AVIONICA: gps.c activa ahora UBX NAV-PVT por CFG-VALSET
+            (CFG-MSGOUT-UBX_NAV_PVT_UART1, 0x20910007) ademas de GGA y RMC. El
+            parser de rafagas se reescribio para separar texto NMEA y binario
+            UBX en el mismo buffer: no se puede buscar el salto de linea porque
+            un payload UBX puede contener 0x0A, asi que cada elemento se
+            identifica por como empieza ($ o B5 62) y se salta por su longitud.
+            Nuevo GPS_Pvt_t y mensaje de CAN2 0x108 (velN, velE, velD en mm/s,
+            fix type, satelites, valido; 15 B de payload, trama de 20).
+            CORE: sensor_board.c decodifica 0x108 y llama a
+            gnc_on_gps_velocity_ned(); la consola USB muestra la linea GPS vel.
+            RMC ya NO llama a gnc_on_gps_velocity(), que marcaria la vertical
+            como desconocida y pisaria la buena.
+            El ICD no cambia: solo cubre CAN1; el CAN2 se documenta en
+            canTelemetry.h (avionica) y sensor_board.h (core), ambos al dia.
+[ ] PROBAR  NAV-PVT con el GPS de verdad y cielo abierto: que la consola de la
+            core muestre GPS vel a ~10 Hz con fix 3D, que la velocidad vertical
+            sea ~0 en reposo y que ubxBadChecksum siga a 0. Si el burst se
+            parte, subir GPS_ASYNC_RX_BUF_LEN (ahora 512, y la rafaga paso de
+            ~170 a ~270 bytes con NAV-PVT).
+[ ] DECIDIR Con NAV-PVT ya se puede quitar el parser de NMEA entero: trae
+            posicion, altura, fix y satelites en enteros con las unidades del
+            ICD, sin el redondeo del ASCII. Dejaria la avionica mas simple y
+            mas precisa, pero toca GGA/RMC que hoy funcionan.
+[x] PROBAR  Reproduccion de vuelo FUNCIONANDO de punta a punta (2026-09-23).
+            Fases practicamente clavadas a la referencia: BOOST 5,08 (ref 5,08),
+            COAST sin control 10,99 (10,99), COAST con control 12,04 (12,04),
+            APOGEO 29,50 (28,58). Altura maxima 3574,4 m (ref 3547, objetivo 3600).
+            Aerofreno: maximo 100 %, 1505 pasos con freno fuera de los que 683
+            saturados (45 %). 21002 ordenes al servo por CAN2 0x200, 0 fallos.
+            210432 ms para 210 s de vuelo, o sea el ritmo real cuadra.
+[x] REVISAR TERCER fallo de la misma familia, y el peor: gnc.c ponia
+            gnss.data_valid = 1 en TODOS los pasos. El GPS va a 10 Hz y el GNC a
+            100, asi que le presentaba la misma muestra diez veces como si fueran
+            diez medidas nuevas: el EKF le daba diez veces el peso que le toca.
+            Se nota sobre todo en el despegue, cuando el receptor pierde enganche
+            y se queda con un valor viejo (en los vectores, +0,55 m/s BAJANDO
+            desde t=5 hasta t=11): el filtro se lo creia, decidia que el cohete
+            no subia y la logica de guiado saltaba de BOOST a APOGEO a los 7,39 s.
+            El vuelo de referencia marca data_valid=1 un paso de cada diez, que es
+            justo lo que hace ahora gnc.c con el flag s_gps.fresh.
+            AFECTA A VUELO REAL, no solo a la reproduccion.
+[x] REVISAR Al terminar la reproduccion el GNC se queda en el estado final del
+            HECHO 2026-10-01: gnc_init() pone a cero los tres modelos.
+            vuelo (EN VUELO / EN TIERRA, error 0x01) aunque gnc_playback_run()
+            llama a gnc_init() al salir. Sospecha: el salto de marca de tiempo,
+            que pasa de la del archivo (0 a 210 s) a la de la avionica en vivo.
+            Solo molesta en banco, pero confunde al mirar la consola.
+[ ] DECIDIR El guiado NO comprueba el GPS para abrir el aerofreno: las cuatro
+            condiciones (1 s en fase, altura sobre el suelo, Mach <= 1,05 y ascenso
+            >= 30 m/s) salen de la navegacion, no del GNSS. Perder el GPS en vuelo
+            no lo bloquea (de hecho pasa en el vuelo de referencia, congelado de
+            t=5 a t=11, y el aerofreno salio bien). Sin GPS NUNCA, origin_set no
+            llega a activarse, la correccion de posicion por GNSS no se ejecuta y
+            la altura es integracion pura de acelerometro, que deriva.
+            OJO: GuidanceControl.c lleva un contador nav_ok_cnt que cuenta pasos
+            con gnss_age_s <= 0,5 s en la fase de ascenso, lo guarda en memoria y
+            NO LO LEE NUNCA. Es codigo muerto: la proteccion "no controles el
+            aerofreno con una navegacion vieja" esta prevista y sin conectar.
+            Se puede anadir desde gnc.c, limitando actuator_cmd cuando gnss_age_s
+            pase de un umbral, sin tocar el modelo generado.
+[ ] IMPL    Subida de archivos a la SD por USB. Hoy la unica forma de meter o
+            actualizar VUELO.BIN es sacar la tarjeta y llevarla al lector del PC
+            (van 4 viajes en una tarde, y cada cambio de formato o de vuelo obliga
+            a otro). La consola USB es de solo salida: haria falta camino de
+            recepcion en el CDC, un protocolo sencillo con checksum y, lo unico
+            delicado, CONTROL DE FLUJO: la SD escribe mas despacio de lo que
+            entrega el CDC, asi que el PC tiene que esperar confirmacion por
+            bloques o se desborda el buffer. Unos 10-20 s por archivo de 1,7 MB.
+            Serviria tambien para lo contrario: sacar VUELOLOG.CSV y los registros
+            de vuelo sin abrir la placa.
+[ ] IMPL    Queda usar el aerofreno tambien en vuelo normal, no solo en la
+            reproduccion: hoy gnc_update() calcula actuator_cmd y nadie lo manda
+            (GNC_USE_ACTUATORS sigue a 0).
+[x] REVISAR Fallo de unidades en el GPS del GNC: gnc_on_gps_position metia grados y
+            el modelo quiere RADIANES (multiplica la diferencia de latitud por un
+            radio en metros, Navigation.c EKF_Update). Cada metro de GPS le llegaba
+            como 57,3 m, o sea posicion y prediccion de apogeo sin sentido en cuanto
+            hubiera fix. Corregido en gnc.c.
+[ ] REVISAR El banco midio 29893 us en el peor paso sumando los tres modelos,
+            frente a los ~140 us de la ejecucion normal. La ventana de medida
+            incluye las interrupciones (SD por DMA, USB), asi que el numero no
+            es limpio; confirmarlo antes de sacar conclusiones de tiempo real.
+[ ] REVISAR El banco tarda 187 s, muy por encima del minuto estimado. Lo que
+            domina es formatear y escribir ~10 MB de CSV (31 snprintf de %.9g
+            por fila en Navigation). Si molesta, escribir las salidas en
+            binario y convertirlas en el PC.
+[ ] DECIDIR El EKF no usa los barometros, solo IMUs y GPS. Ver si se quiere altura
+            barometrica en el futuro (habria que tocar el modelo de Simulink).
+[ ] DECIDIR Temperatura de la IMU1: el GNC la pide y CAN2 no la manda; se pasa 25 C fijo.
+[x] IMPL    Enviar datos de debug desde el core (estado de las placas, medidas...).
+            Por USB (puerto COM virtual), App/debug_console.c.
+[x] PROBAR  Consola de debug por USB: el PC reconoce el puerto COM ("LEEM Core H7 (debug)").
+[x] REVISAR USB sin enumerar: VDD33USB (pin 95) sin tension (PWR_CR3 USB33RDY=0). Era un
+            fallo de hardware, ya corregido en la placa.
+[ ] REVISAR Corregir en el esquematico/PCB la alimentacion de VDD33USB (pin 95) para la
+            siguiente version de la placa, si no esta ya hecho.
+[ ] REVISAR Abrir el .ioc en CubeMX y comprobar los cambios a mano del USB: reloj USB desde
+            HSI48, interrupcion OTG_HS (prioridad 6). HSI48 + CRS y los pines PA11/PA12
+            en AF10 (CubeMX no los genera) estan en el USER CODE de usb_otg.c.
+[ ] REVISAR UART8 (PE1) y UART9 (PD15): con el conversor USB-serie la senal salia con
+            conflicto (nivel alto a 4,4 V, ceros a media tension) en las dos. Revisar el
+            conversor/cableado y comprobar que PE1 y PD15 no se han danado.
+            UART8 funciona (2026-10-06): la camara RunCam contesta por PE1/PE0 sin
+            errores de CRC. Falta comprobar el UART9 con la camara 2 (el codigo
+            ya la maneja; los RX de las dos llevan pull-up interno).
+[x] IMPL    Zumbador (red ALARM, PE4 = TIM15_CH1N): Drivers/Buzzer (frecuencia variable,
+            PWM 50 %) y App/sounds.c (melodia al arrancar, antes del wake up).
+[x] PROBAR  Melodia de arranque: se oye bien (circuito activo a nivel alto).
+[ ] DECIDIR La melodia (Bella Ciao) dura ~13 s y retrasa el wake up de las placas. Acortarla,
+            subir STARTUP_SONG_BPM o desactivarla (SOUNDS_STARTUP_ENABLE 0) para vuelo.
+[ ] IMPL    Avisos sonoros utiles (errores, placas que no responden, estado armado...).
+[x] IMPL    Los 6 LEDs RGB en cadena (WL-ICLED 1312020030000, tipo WS2812) en PD12:
+            Drivers/Leds (TIM4_CH1 + DMA, 800 kbit/s) y App/led_show.c (secuencia de
+            arranque de ~4 s antes de la melodia).
+[x] PROBAR  LEDs RGB: la secuencia de arranque se ve bien y los colores salen correctos.
+[ ] IMPL    Usar los LEDs como indicador de estado en vuelo (placas despiertas, fix del
+            GPS, continuidad de pirotecnicos, armado...) en vez de solo al arrancar.
+[ ] REVISAR TIM4 y el DMA de los LEDs se configuran a mano en leds.c (MX_TIM4_Init no se
+            llama, el .ioc no tiene DMA ni los tiempos correctos). Revisar en CubeMX.
+[ ] REVISAR TIM15 no esta activado en el .ioc (se configura a mano en buzzer.c). Activarlo
+            en CubeMX (TIM15 CH1N PWM) o dejarlo asi.
+[x] IMPL    Lectura y escritura de archivos en las dos SD: App/storage.c (FileX standalone)
+            sobre Drivers/Sd_card (SDMMC1/2, 4 bits, DMA). Al arrancar: CORE_TEST.TXT
+            (escribe, relee y compara) y BOOTCNT.TXT (contador de arranques). En consola.
+[x] PROBAR  SD1 con tarjeta sana: montada (3840 MB), escribe/relee/compara bien y el
+            contador de arranques persiste (probado 2026-09-22, test OK en 180 ms).
+            La de 2 GB estaba muerta: descartada.
+[ ] PROBAR  SD2 con tarjeta (ahora no responde, HAL 0x4 = sin respuesta a comandos).
+[x] REVISAR CAN2 caido (2026-09-22): resuelto por el usuario el 2026-09-23.
+            Ya entran 2 muestras de cada IMU por ejecucion del GNC.
+[x] REVISAR El EKF del GNC no terminaba su alineamiento (2026-09-23):
+            DIAGNOSTICADO, no es un fallo. Tras 200 pasos quieto el modelo
+            compara la gravedad medida con la que esperaria segun la actitud
+            declarada en nav_tun.init_euler_rad y, si difieren mas de 10
+            grados, descarta el alineamiento y vuelve a empezar
+            (Navigation.c, linea 734). Con la guia a 90 grados espera leer
+            +9,81 en el eje X de la IMU1; en el banco, con la placa tumbada,
+            lee +9,81 en Z, o sea 90 grados de diferencia: por eso nunca
+            valida. Se alineara con el cohete vertical.
+            Anadida a la consola la linea "Alineando N/200" con |a| y |w|.
+            El cuaternion inicial de la memoria del modelo se pone ahora
+            tambien a 90 grados en gnc_init(), antes se quedaba en los 84,5
+            de fabrica y la actitud que salia por radio era esa.
+[ ] DECIDIR  Convenio de ejes entre la avionica y el GNC (2026-09-23): el
+            modelo trabaja en cuerpo X morro, Y derecha, Z abajo, asi que
+            tumbado esperaria -9,81 en Z; la placa lee +9,81. Confirmar que
+            eje de la placa es el del morro y como va montada en el cohete,
+            no sea que haya que invertir Z.
+[x] PROBAR   Alineamiento del EKF: FUNCIONA (2026-09-23). Se giraron las
+            medidas al entrar al GNC para pasar de ejes de placa (Z a lo
+            largo del cohete) a los del modelo (X morro, Y derecha, Z
+            abajo), en gnc.c, _board_to_body(). El EKF valida en 2 s y da
+            nav OK, cabeceo 89 grados con la placa tumbada en la mesa, que
+            es la misma orientacion que tendra de mamparo en la rampa.
+[ ] DECIDIR  Los angulos de Euler no sirven con el cohete vertical: a 90
+            grados de cabeceo hay bloqueo de cardan y alabeo y guiñada
+            dejan de ser independientes (se ven los dos a 29 grados, solo
+            su diferencia significa algo). Para la telemetria y para el
+            registro conviene mandar el cuaternion, o alabeo respecto a una
+            referencia fija. Afecta a rf_telemetry.c y a la consola.
+[ ] REVISAR Un paso del GNC tardo 9433 us frente a los 129 us habituales,
+            con el presupuesto en 10000. Fue una vez, al terminar el
+            alineamiento. Confirmar que es solo el primer paso del EKF
+            completo y no algo que pueda repetirse en vuelo.
+[x] REVISAR La telemetria de radio soltaba una rafaga de ~20 paquetes al
+            arrancar, recuperando el retraso del wake up. Corregido en
+            rf_telemetry.c: si se pierde una ventana se sigue desde ahora.
+[ ] REVISAR El GPS no arranco en el encendido del 2026-09-22 (INIT_STATUS dice !gps),
+            con el resto de sensores OK. Repetir cuando vuelva el CAN2.
+[ ] REVISAR Polaridad del pin de deteccion: SD1 con tarjeta CD=0, SD2 (sin tarjeta?) CD=1.
+            Si se confirma, no intentar montar con CD=1 y detectar insercion/extraccion.
+[x] HECHO   SD1 a 20 MHz desde el 2026-10-05 (s_div_datos en sd_card.c). La SD2
+            sigue a 625 kHz: falta pasarle App/sd_bench.c (cambiar BENCH_SD).
+[-] DECIDIR Velocidad del bus SD: ahora 625 kHz (SD_CARD_CLOCK_DIV 16 en sd_card.c, como el
+            .ioc). Subir cuando funcione (p. ej. div 2 = 5 MHz) para el log de vuelo.
+            MEDIDO 2026-10-05 con App/sd_bench.c en la SD1 (30 GB, FAT32, cluster
+            32 KB): FUNCIONA A 20 MHz (div 0, sin dividir), ~20 MB escritos,
+            releidos y comparados sin un solo error. Escribiendo a trozos de
+            16 KB:
+                 625 kHz   281 KB/s   56 ms por trozo   (hoy)
+                1,25 MHz   548 KB/s   29 ms
+                 2,5 MHz  1036 KB/s   15 ms
+                   5 MHz  1905 KB/s    8 ms
+                  10 MHz  3209 KB/s  4,8 ms
+                  20 MHz  4973 KB/s  3,0 ms (max 4,6 en 8 MB seguidos)
+            Leyendo, 8 MB/s a 20 MHz. Falta: probar la SD2 a 20 MHz, y que
+            aguante con todo el cohete funcionando (servo, CAN, vibracion).
+            Un error de bus NO pasaria desapercibido: cada bloque lleva CRC y
+            el HAL devuelve error, no datos malos.
+[ ] DECIDIR Tarjetas de mas de 32 GB vienen en exFAT: FX_ENABLE_EXFAT (licencia Microsoft)
+            o formatear en FAT32.
+[-] IMPL    Log de vuelo en las SD (que datos, formato, frecuencia, las dos a la vez).
+            DUPLICADO: ver GUARDAR LOS DATOS DEL VUELO EN LA TARJETA SD.
+[ ] REVISAR MX_SDMMC1/2_SD_Init no se llaman (hacen Error_Handler sin tarjeta): la
+            configuracion del SDMMC esta repetida en sd_card_init(). La PoC
+            poc/usd_filex_dma necesita quitar FX_STANDALONE_ENABLE de config/fx_user.h
+            y volver a compilar bsp/.
+
+
+---------------------------------------------------------------------------
+POWER (power_g4_v0)
+---------------------------------------------------------------------------
+[ ] PROBAR  Medidas de power_monitor.c frente a polimetro (3V3, 5V, 11V: tension y corriente).
+[ ] IMPL    Calibrar las lecturas de power (tensiones y corrientes) frente a polimetro y
+            ajustar las constantes CAL_* y divisores de power_monitor.c.
+[ ] PROBAR  Drivers/Analog: ADC5 y PA0/PA2 estan fuera de CubeMX y los OPAMP 2/3/4 se
+            arrancan por primera vez (nunca probado en placa).
+[ ] REVISAR Shunts reales de 3V3, 5V y 11V en el esquematico (ahora 5 mohm sin confirmar).
+            Si se corrigen, dejar CAL_*_FACTOR en 1.0 y offset en 0 y volver a medir.
+[ ] REVISAR INA138 alimentado a +5 V con salida directa a PA1 (pin de 3,3 V): por encima de
+            ~3,3 V / (78 * R_shunt) (~8,5 A con 5 mohm) satura y sobretensiona el pin.
+[ ] DECIDIR AllPyroCheck() tras el wake up enciende los 4 pirotecnicos y bloquea 5 s
+            (no se atiende CAN). ¿Se mantiene en vuelo? Seguridad (RBF).
+[ ] DECIDIR Borrar ThreeV_Current()/FiveV_Current() (duplican power_monitor.c) y la
+            declaracion de ElevenV_Current() sin implementar.
+[ ] DECIDIR Para que se usa CAN2 (ID 0x400 en formato clasico, filtro que acepta todo).
+[ ] REVISAR OPAMP6 (Pyro2_DAC, seguidor de DAC) no se arranca en ningun sitio.
+[ ] DECIDIR ¿Hace falta confirmacion de CMD_PYRO_FIRE en el ICD?
+[ ] IMPL    Consumo en las lineas de los pirotecnicos (Pyro1 y Pyro2) por CAN. Las entradas
+            ya estan en Drivers/Analog (ANALOG_I_PYRO1/2, y tension ANALOG_V_PYRO1/2);
+            faltan la electronica en power_monitor.c y el mensaje en el ICD.
+
+
+---------------------------------------------------------------------------
+AVIONICA (sensores_avionica_g4_v0)
+---------------------------------------------------------------------------
+[x] IMPL    Llamar a CanNode_Poll() en el bucle principal de App/main.c para
+            responder si el core se resetea.
+[ ] PROBAR  Firmware tras la reorganizacion (App/main.c, sensorsI2c, sensorIrq, sensorsUart).
+[x] IMPL    Que la avionica NO se cuelgue si falla un sensor: bucles de espera acotados en
+            barometer.c / imu.c / imu2.c (antes esperaban para siempre), timeouts de I2C
+            de 1000 a 20 ms, sensor caido se salta y se reintenta cada 5 s, y si se caen
+            todos los de un bus se reinicia el periferico I2C. SensorsI2c_ActiveMask().
+[x] PROBAR  Tolerancia a fallos de la avionica: con un sensor desconectado el resto
+            sigue funcionando y el sensor sale marcado en la consola del core.
+[ ] IMPL    Comando CAN "que sensores estan activos": el core lo pide y la avionica
+            responde con un mapa de bits (baro1, baro2, IMU1, IMU2, magnetometro, GPS,
+            VN-100) diciendo cuales responden. Definirlo en el ICD (seria 6.11 / 6.12,
+            IDs 0x132 y 0x232), implementarlo en avionica y core, y mostrarlo en la
+            consola de debug. La avionica ya lleva la cuenta: SensorsI2c_ActiveMask().
+[x] IMPL    INIT_STATUS (ICD 6.11, 0x22F/0x23F/0x24F): cada placa dice al core con que
+            componentes ha arrancado (uint32 ok + uint32 supported), sin que se lo pidan
+            y tras cada wake up. Hecho en avionica (7 bits: baros, IMUs, mag, GPS,
+            VN-100) y en el core (sys_state + consola, al arrancar y en cada informe).
+[ ] IMPL    INIT_STATUS en power (0x22F) y rf (0x24F): definir sus bits en el ICD
+            (power: ADC/OPAMPs/pirotecnia; rf: SX1262) e implementarlo.
+[x] PROBAR  INIT_STATUS de la avionica: la consola del core muestra COMPONENTES INICIADOS.
+
+[x] IMPL    Rutina de calibracion de los sensores de avionica (ICD 6.8/6.9: core envia
+            0x131, avionica calibra y responde 0x231). App/calibration.c.
+[x] DECIDIR Rutinas concretas de calibracion: baros 1 s de media (presion base, no se
+            resta), giroscopios 2 s de media (offset), acelerometros 2 s de media menos
+            la proyeccion de g (offset). Todo a la vez.
+[x] DECIDIR tilt_angle en grados. Resultados solo en RAM (se pierden al resetear).
+[x] IMPL    Segundo filtro de FDCAN1 (indice 1: 0x130/0x7F0) en CanNode_Init.
+[ ] PROBAR  Calibracion completa: core envia 0x131 al arrancar, avionica tarda ~2 s y
+            responde 0x231, state.avionics_calibration_status pasa a DONE.
+[x] IMPL    GPS por CAN2: GGA (0x106) y RMC (0x107) en enteros, 10 Hz. Aviónica configura
+            el MAX-M10S por UBX al arrancar; el core los decodifica (sensor_board.c)
+            y los muestra en la consola.
+[x] PROBAR  GPS completo en interior: GGA y RMC llegan al core a 10 Hz (config UBX OK),
+            sin fix. Causa del primer intento sin datos: GPS_RST (PA6) quedaba a
+            nivel bajo (modulo en reset). Ya lo suelta GPS_Init().
+[x] PROBAR  GPS con cielo abierto: fix, coordenadas, velocidad y fecha correctos.
+[x] DECIDIR Antena del GPS (J1) activa: SensorsUart_Init() pone ACT_ANTENNA (PA4) a nivel
+            alto (VCC_RF a la antena). Comprobar que la antena admite 3,3 V.
+[ ] REVISAR Esquematico GPS: V_BCKP (pin 6) sin conectar. u-blox recomienda unirlo a VCC
+            si no hay bateria de respaldo. Si el modulo no arranca bien, puentearlo.
+[ ] REVISAR .ioc aviónica: PA6 GPS_RST con nivel inicial bajo (modulo en reset hasta
+            GPS_Init()); se puede poner nivel inicial alto en CubeMX.
+[ ] REVISAR MAX-M10S a 10 Hz con varias constelaciones: comprobar que mantiene 10 Hz
+            (el M10 puede limitar la tasa con GPS+GAL+GLO+BDS a la vez).
+[ ] DECIDIR ¿Guardar la configuracion del GPS en su flash (capa FLASH) o seguir
+            enviandola en RAM en cada arranque (~0,5 s)?
+[ ] IMPL    VN-100 por CAN2 (ahora solo se lee).
+[ ] REVISAR LPUART1 del .ioc esta a 209700 (valor por defecto de CubeMX); GPS_Init() la
+            reconfigura con prescaler /8 a 115200. Ajustar el .ioc.
+[ ] REVISAR Montaje real: eje de la placa que apunta a la ogiva (supuesto +Z) y
+            orientacion de los ejes de cada IMU respecto a la placa.
+[ ] DECIDIR Hacia que lado se inclina el cohete: CALIBRATION_TILT_TOWARD en
+            App/calibration.c (inventado: +X). Con angulo 0 no influye.
+[ ] REVISAR Signo de la proyeccion de g al inclinar: comprobar en banco con un angulo
+            conocido (p. ej. 30 grados) que el offset del acelerometro sale ~0.
+
+
+---------------------------------------------------------------------------
+RF (rf_g4_v0)
+---------------------------------------------------------------------------
+[ ] PROBAR  Wake up con el core (respuesta 0x240) y que state.rf pase a true.
+[ ] PROBAR  Radio con la configuracion verificada: TX_DONE en ~41 ms, 0 fallos.
+[ ] PROBAR  Consola en LPUART1 (TX PB11): el comentario antiguo decia USART3 con TX en PB10.
+[ ] REVISAR Abrir el .ioc en CubeMX y comprobar los cambios a mano (LPUART1 115200,
+            PA2 NSS arranca en alto, velocidad VERY_HIGH en SPI, PC13/PC14 entradas).
+[x] DECIDIR Potencia de la RF: subida a +22 dBm (el maximo del SX1262, 158 mW; la banda
+            permite 500 mW e.r.p.). Medido: el RSSI subio 24 dB, no los 8 esperados, asi
+            que el "+14 dBm" anterior eran en realidad unos -2 dBm (la tabla de PA del
+            datasheet supone SetTxParams = +22 en todas sus filas). Con 22 dBm el
+            ajuste del cristal optimo pasa a 0x10 (+1,2 ppm): los 118 mA de transmision
+            tiran del cristal unos -4 kHz.
+[ ] PROBAR  Que la alimentacion de la placa aguanta los ~118 mA de pico al transmitir a
+            22 dBm sin que caiga la tension (antes eran ~45 mA).
+[ ] DECIDIR Subir la potencia: la banda 869,4-869,65 permite 500 mW e.r.p. (27 dBm) y el
+            SX1262 llega a +22 dBm. De momento se deja en +14 dBm (config verificada);
+            subir tras probar la banda nueva, comprobando consumo (~118 mA en TX a
+            +22 dBm) y adaptacion de antena.
+[x] DECIDIR Banda: se pasa a 869,525 MHz (sub-banda 869,4-869,65: 500 mW e.r.p. y 10 %
+            de ciclo de trabajo). Con BW125 ocupa 869,4625-869,5875 MHz, dentro.
+[ ] PROBAR  Radio en la banda nueva (869,525 MHz): repetir la prueba de TX_DONE y fallos.
+[x] RESUELTO La radio del cohete no cerraba enlace: ningun paquete pasaba el CRC, en
+            las dos direcciones. Causa: los condensadores de carga externos del cristal
+            del SX1262 (C37 y C38, 10 pF). El chip ya lleva los suyos dentro, y con los
+            dos juegos el oscilador iba al limite: tanto ruido de fase que la cabecera
+            pasaba (va mas protegida) pero el payload no, con SNR de 0 dB a cualquier
+            potencia. Quitandolos: SNR +13 dB (la referencia comercial da +12,75) y
+            60 de 60 paquetes correctos. Ajuste fino con los condensadores internos:
+            xtal_trim = 0x0F deja el error en +0,1 ppm (antes +3 kHz). Ese ajuste se
+            borra al arrancar el cristal, asi que el driver deja el reposo en STDBY_XOSC.
+            De paso: el coaxial que iba a la antena tenia 11 dB de perdida, esta fuera.
+[ ] IMPL    Quitar C37 y C38 del esquematico y del PCB para la siguiente version de la
+            placa RF, y anotar que el SX1262 no lleva condensadores de carga externos.
+[ ] REVISAR El xtal_trim (0x0F) es de ESTA placa: cada unidad necesita el suyo. Ver si
+            se calibra una vez y se guarda en flash, o si se deja fijo y se acepta el
+            error de las demas unidades.
+[x] IMPL    Prueba de alcance por ECO, lista para usar (2026-09-23). Dos PoC en
+            rf_g4_v0, se activan descomentando su linea en CMakeLists.txt:
+              poc/radio_echo/main.c  la placa que se lleva lejos. Responde a cada
+                paquete con "E12 R-97 S-8 G-99 F-1250 L16": numero de eco, RSSI,
+                SNR, RSSI tras despreading, error de frecuencia en Hz y longitud.
+                No responde a los paquetes con CRC malo, solo los cuenta.
+              poc/radio_ping/main.c  la que se queda con la consola. Manda un ping
+                por segundo, espera el eco 400 ms y saca por LPUART1 las DOS
+                direcciones del enlace en la misma linea, mas ida y vuelta en ms
+                y el porcentaje de pings perdidos.
+            La gracia del eco es que desde un solo extremo se caracterizan los dos
+            sentidos, que no tienen por que ser iguales (cada placa transmite con
+            su potencia y recibe con su antena, LNA y suelo de ruido).
+            Ciclo de trabajo: ping ~50 ms + eco ~60 ms a 1 Hz = 5 y 6 % de cada
+            placa, por debajo del 10 % de la banda. Subir la cadencia obliga a
+            rehacer la cuenta.
+            Lo que marca el alcance maximo es el SNR y los pings perdidos, no el
+            RSSI: a SF7 el demodulador llega hasta unos -7,5 dB de SNR.
+[x] IMPL    sx1262_pkt_status_t lleva ahora freq_error_hz, leido de los registros
+            FEI del chip (0x076B, 20 bits en complemento a dos) con la conversion
+            del datasheet. Dice si los dos cristales se estan yendo: a SF7/BW125 se
+            toleran del orden de +/- 30 kHz, pero cuanto mas justo va el enlace por
+            distancia mas cuesta cada kHz. Si sale grande y constante, retocar
+            xtal_trim en bsp_sx1262.c.
+[x] REVISAR QUE PLACA ES CADA UNA (2026-09-24). El "modulo de desarrollo" que se
+            usa de estacion de tierra NO es una rf_g4_v0: es una DX-PJ26 v1.2, o sea
+            una Blue Pill STM32F103C8T6 con un modulo DX-LR30 (SX1262), programada
+            desde el Arduino IDE con RadioLib 7.7.1. Device ID 0x410, no 0x469.
+            Su codigo vive fuera de los repos, en C:\Users\User\Documents\Arduino\
+              LEEM_Receptor_SX1262\  el receptor de ayer (escucha e imprime)
+              LEEM_Ping_Alcance\     el lado que pregunta de la prueba de alcance
+            arduino-cli NO esta en el PATH: viene dentro del Arduino IDE, en
+            AppData\Local\Programs\Arduino IDE\resources\app\lib\backend\
+              resources\arduino-cli.exe
+            Se compila y sube con arduino-cli, FQBN
+            STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8,upload_method=swdMethod
+            (por ST-Link; tambien admite el bootloader serie con BOOT0).
+            Consola: USART1, PA9 TX / PA10 RX, 115200, con conversor USB-serie.
+            AVISO: comprobar el Device ID ANTES de escribir en cualquier placa. El
+            2026-09-24 se le subio por error el binario del G4 y se perdio el sketch
+            que tenia (recuperable: el .ino estaba intacto).
+[x] IMPL    PUENTE USB <-> RADIO en la estacion de tierra (2026-09-28). Sustituye
+            al receptor que imprimia texto: ahora la Blue Pill es un modem
+            transparente y quien decodifica es el PC.
+            Codigo: C:\Users\User\Documents\Arduino\LEEM_Puente_Radio\
+            Puerto serie COM11 (CH340) a 115200. NO es COM10, cambio de numero.
+
+            TRAMA radio -> serie
+              AA 55 | len | payload[len] | rssi | snr | df_lo df_hi | flags | crc8
+                rssi   int8   dBm
+                snr    int8   pasos de 0,25 dB
+                df     int16  Hz, little endian, con signo
+                flags  b0 CRC del paquete LoRa malo
+                       b1 acuse local (no viene del aire)
+                       b2 solo con b1: la transmision fallo
+                crc8   polinomio 0x07, sobre len + payload + metadatos
+            TRAMA serie -> radio
+              AA 55 | len | payload[len] | crc8        (len = 0 se descarta)
+
+            POR QUE VA ENMARCADO y no en crudo: la serie es un flujo de bytes y
+            la radio son paquetes. Sin longitud explicita, un solo byte perdido
+            desincroniza el flujo para siempre. Con el sincronismo se reengancha
+            en el paquete siguiente.
+            LOS PAQUETES CON CRC MALO SE REENVIAN marcados en flags: en una
+            prueba de alcance distinguir "llego corrupto" de "no llego nada" es
+            justo la senal que marca el borde de la cobertura.
+            ACUSE DE TRANSMISION (len = 0, bit 1): sin el, el operador manda un
+            comando y no sabe si llego a radiarse. El enlace de subida es el
+            lado debil, asi que hace falta.
+
+            VERIFICADO EN BANCO (2026-09-28), con el core emitiendo a 15 Hz:
+              bajada   180 tramas en 12 s = 15,0/s, 0 huecos, 0 CRC malos
+                       RSSI -29 a -35 dBm, SNR +11 a +13 dB, df 22 a 247 Hz
+                       (el offset de -2000 Hz deja el error en centenares de Hz)
+              subida   60 envios seguidos abren 19 huecos en el contador, que es
+                       la sordera esperada mientras transmite (~15,5 ms por
+                       envio de 4 bytes). 10 envios -> 10 acuses, todos OK.
+            OJO con una trampa de medida: espaciando los envios 400 ms no se
+            perdia casi nada, porque 400 ms son exactamente 6 periodos de 66,67
+            ms a 15 Hz y las transmisiones caian siempre en el silencio entre
+            paquetes. Para medir la sordera hay que variar la fase.
+
+[x] IMPL    ESTACION DE TIERRA EN PYTHON (2026-09-28), en tools/estacion/.
+            Solo necesita Python 3 con Tkinter (de serie) y pyserial: ni Qt, ni
+            matplotlib, ni navegador. En campo, una dependencia que no hay que
+            instalar es una que no puede fallar.
+              python estacion.py                 busca el puerto solo
+              python estacion.py --puerto COM11  lo fuerza
+              python estacion.py --demo          vuelo simulado, sin hardware
+            Modulos: paquete.py (espejo de flight_packet.c), puente.py (hilo
+            lector del puerto), widgets.py (paleta y Panel base), paneles.py
+            (cada recuadro), estacion.py (estado, distribucion y bucle).
+            VERIFICADA contra el cohete: 170 paquetes en 12 s, 15,0 Hz, 0
+            perdidos, 0 CRC malos, y el ping de subida 4 acuses de 4.
+
+[x] RESUELTO PYSERIAL: read(512) CON timeout=0.1 SE SALTA EL TIMEOUT. Medido
+            con el CH340 en Windows (2026-09-28): devolvia siempre 512 bytes
+            exactos tras 1030 ms, en vez de lo que hubiera tras 100 ms. A 15 Hz
+            y 33 bytes por trama, eso metia los paquetes en rafagas de 16 con
+            un segundo de silencio entre medias. Consecuencias: la cadencia
+            medida salia a 31 Hz (el doble) y la pantalla iba hasta un segundo
+            por detras del cohete, que en vuelo no vale.
+            La forma correcta es read(sp.in_waiting or 1): entrega lo que haya
+            ya y si no hay nada espera a un byte. Medido despues: 66 ms entre
+            llegadas, que es el periodo de 15 Hz, y la estacion marca 15,0 Hz.
+            Ojo si se escribe otro lector de puerto en el proyecto.
+
+[x] RESUELTO CONVENIO DEL CUATERNION DEL PAQUETE, confirmado por medida y no
+            por suposicion (2026-09-28). Cogiendo un informe de la consola y su
+            volcado "en el aire" del mismo instante, las formulas ZYX aplicadas
+            a q = (w,x,y,z) leido como actitud del CUERPO RESPECTO A NED dan
+            44,80 / 51,35 / 81,25 frente a los 44,75 / 51,31 / 81,16 que
+            imprime el modelo. Menos de 0,1 grados. El morro en NED es
+              (1-2(y2+z2), 2(xy+wz), 2(xz-wy))
+            OJO, la matriz TRANSPUESTA da un resultado igual de creible y
+            completamente falso: probando la transpuesta salia el morro 32
+            grados bajo la horizontal con la placa plana sobre la mesa.
+
+[ ] REVISAR EL PAQUETE DE VUELO NO LLEVA NUMERO DE VERSION. Si cambia una
+            escala en flight_packet.c y no se cambia en tools/estacion/
+            paquete.py, la estacion ensena numeros creibles y equivocados sin
+            avisar. No hay forma automatica de detectarlo. Decidir si se gasta
+            algun bit en una version o si basta con la disciplina de tocar los
+            dos archivos a la vez.
+
+[ ] REVISAR LA ELEVACION PIERDE RESOLUCION CERCA DE LA VERTICAL. El cuaternion
+            va a 8 bits por componente (~0,9 grados cada una), pero la
+            elevacion sale de un arcoseno y ese se aplana en los 90: medido en
+            simulacion, a 88 grados reales el paquete devuelve 84,9. A 45 el
+            error baja a decimas. Es del formato, no de la interfaz, y en la
+            rampa da igual porque ahi ya se sabe que esta vertical. Anotado por
+            si algun dia hace falta la actitud fina cerca de la vertical.
+
+[x] IMPL    PAQUETE DE ESTADO (status_packet.h), 32 bytes con la SALUD del
+            cohete, no con su vuelo: las 3 placas, los sensores de la avionica
+            (arrancados Y los que la placa lleva), las dos SD, los dos buses
+            CAN y el tiempo encendido. Se manda 3 veces al arrancar y luego
+            solo cuando tierra lo pide.
+            Son dos paquetes y no uno mas gordo porque meter esto en el de
+            vuelo costaria aire 15 veces por segundo para repetir cosas que no
+            cambian nunca.
+
+[x] IMPL    ENLACE DE SUBIDA COMPLETO, por fin (2026-09-29). Lo que faltaba de
+            la RF desde hace semanas:
+              can_protocol  RF_RECEIVED 0x241 (ICD 6.12)
+              rf_g4_v0      radio_listen() + radio_receive_poll(), escucha
+                            continua salvo mientras transmite, y
+                            can_node_send_received() para subirlo al core
+              core          _process_rf_received en sys_utilities.c y
+                            uplink.c, que valida e interpreta el comando
+              estacion      paquete.comando() y la peticion automatica
+            Comando: 4 bytes 0x5A | id | parametro | XOR. El XOR va ADEMAS del
+            CRC de LoRa porque el CRC dice que los bits llegaron como salieron,
+            no que lo que salio fuera un comando NUESTRO.
+
+[x] PROBAR  BAJADA DEL PAQUETE DE ESTADO, verificada en banco (2026-10-01) con
+            el core grabado:
+              consola   CAN1 2 tramas/s, CAN2 836 tramas/s (medido), 3 estados
+                        mandados al arrancar
+              por aire  los paquetes llegan y decodifican bien en la estacion:
+                        3 placas presentes, gps en fallo (igual que el !gps de
+                        la consola), SD1 3760 MB / 68 arranques / test OK,
+                        SD2 30416 MB / 15 / test OK, 23 s encendido
+              crudo     a5 01 01 cf 5f 7f 3f 44 0f eb 00 6d 07 02 00 08 00 00
+                        ff 17 00 ... (32 B)
+            El arranque tarda ~21 s en soltar el primero porque el wake up a
+            las otras placas tarda 20 s (ver "Wake up terminado en 20137 ms").
+            Mirar por que tarda tanto: no es culpa del paquete de estado.
+
+[x] IMPL    MAPEAR EL MANDO DE AEROFRENO AL ANGULO EFECTIVO DEL SERVO.
+            HECHO EN PARTE 2026-10-03: carrera -> angulo de servo por la
+            cinematica de la biela-manivela (App/airbrake.c). Queda: comprobar
+            los datos del servo y que significa el 0..1 del GNC (ver arriba,
+            PROBAR AEROFRENO DE VERDAD y DECIDIR QUE SIGNIFICA EL 0..1). Hoy
+            airbrake.c hace una regla de tres pelada: 0..1 del guiado -> 0..255
+            del byte del servo, y de ahi a microsegundos de pulso en la power.
+            Eso supone que el aerofreno abre PROPORCIONAL al angulo del servo,
+            y no es verdad: entre el servo y la superficie hay una cinematica
+            (varilla, palanca) que no es lineal, y la superficie expuesta
+            tampoco crece lineal con el angulo.
+            Consecuencia: cuando el guiado pide "50 % de freno" no esta
+            saliendo medio freno, y el GNC esta ajustado creyendo que si. Es un
+            error que no se ve en el banco y si en vuelo.
+            QUE HACE FALTA:
+              1. medir el recorrido real: angulo de servo -> apertura de la
+                 superficie, con el mecanismo montado, varios puntos
+              2. decidir si el mando del GNC es "fraccion de area expuesta" o
+                 "fraccion de recorrido"; no es lo mismo y hay que preguntarselo
+                 a quien hizo el modelo
+              3. meter la tabla (o el polinomio) en airbrake.c, con los topes
+                 mecanicos reales, que seguramente NO son 0 y 255
+              4. comprobarlo con gnc_playback.c y el servo de verdad, que para
+                 eso se hizo
+            Mientras no este, el aerofreno esta sin calibrar.
+
+[x] IMPL    ANGULO DE LANZAMIENTO DESDE TIERRA (2026-10-01). El de la rampa,
+            medido DESDE LA VERTICAL (0 = vertical). App/lanzamiento.c lo
+            guarda en RAM y en las dos SD (ANGULO.TXT, texto legible), y lo lee
+            al arrancar: si el core se reinicia en la rampa no vuelve a la
+            vertical sin que nadie se entere. Solo escribe en la SD si cambia.
+            Comando 0x13 en el formato NUEVO de 5 bytes (parametro de 16 bits,
+            centesimas de grado 0..9000); 0xFFFF es una consulta que no cambia
+            nada. Se deniega en vuelo y simulando (en READY si se puede: es
+            cuando el cohete esta en la rampa).
+            Se contesta con un ACUSE, el tercer tipo de paquete de bajada (8
+            bytes, marca 0xC3), que trae el valor que el cohete tiene AHORA:
+            la estacion solo da por confirmado si coincide con lo pedido.
+            Estacion: boton ANGULO LANZ.; el panel sustituye al RECORRIDO, con
+            ruleta (arrastrar, o rueda del raton: 0,5 grados, 0,1 con
+            Mayusculas), casilla numerica y ENVIAR AL COHETE. Reintenta cada
+            ~0,5 s (con jitter) hasta el acuse; plazo 60 s.
+            VERIFICADO CONTRA EL COHETE: consulta, envio confirmado en 0,8 s, y
+            tras reiniciar el core lo lee de la SD. Se dejo en 0,00.
+
+[x] IMPL    PASARLE EL ANGULO DE LANZAMIENTO AL GNC. HECHO (RAMPA AL GNC, en la
+            seccion de la v1.2; con la v1.5 va en nav_tun.rail_elev_deg).
+            Lo de abajo es como estaba. Hoy el GNC arranca con su
+            valor por defecto (GNC_RAIL_ELEVATION_RAD en gnc.c, rampa
+            vertical) y el que llega de tierra solo se guarda. Al hacerlo:
+              - UNIDADES: el GNC trabaja en ELEVACION desde la horizontal
+                (nav_tun.init_euler_rad[1] y el cuaternion inicial que pone
+                gnc_init()). lanzamiento.c es desde la VERTICAL:
+                elevacion = 90 - angulo. Es facil equivocarse de signo o de
+                referencia y que el cohete arranque tumbado.
+              - EL ALINEAMIENTO LO COMPRUEBA: Navigation.c (~linea 734) rechaza
+                el alineamiento si la gravedad medida se separa mas de 10
+                grados de la actitud declarada. Un angulo mal puesto en mas de
+                10 grados = navegacion que no se alinea nunca. Y uno bien
+                puesto deberia notarse en la consola (alineamiento OK).
+              - FALTA EL RUMBO: con la rampa inclinada no basta el angulo, hace
+                falta hacia DONDE se inclina (azimut) para el cuaternion. Hoy
+                no se manda. Decidir si se añade al comando o si el EKF lo
+                saca del magnetometro.
+              - CUANDO SE APLICA: el GNC lo usa en gnc_init(). Un cambio
+                despues obliga a reiniciar el GNC (y realinear), y eso solo
+                tiene sentido en tierra. Decidir si se reinicia solo al
+                recibirlo o si se aplica en el siguiente arranque.
+
+[x] IMPL    HECHO 2026-10-05: App/aspid_data.c (ver README, "Registro en la
+            SD1"). Carpeta aspid_data_<fecha> por arranque en la SD1, con
+            telemetria/ (todo lo que sale y entra por radio), vuelo/ a 100 Hz
+            del despegue a los 50 m de bajada (con 1 s de antes) y
+            simulaciones/. Sella la SD tras un vuelo de verdad. Probado en la
+            mesa con ASPID_DATA_PRUEBA (fecha falsa y despegue forzado): 1600
+            filas y 367 lineas, releidas de la tarjeta y cuadran al byte; ~1
+            tick del GNC recuperado por segundo grabando, ninguno perdido.
+            QUEDA (ver las entradas de abajo de "REGISTRO SD1").
+[-] IMPL    (texto original) GUARDAR LOS DATOS DEL VUELO EN LA TARJETA SD. Hoy el cohete no guarda
+            nada de un vuelo de verdad: solo la simulacion escribe
+            VUELOLOG.CSV. Lo que ya hay para apoyarse: storage_stream.c
+            (abrir, escribir por bloques con buffer propio, cerrar), las dos
+            SD montadas con autotest y contador de arranques.
+            QUE GUARDAR, como minimo:
+              - las medidas en crudo de CAN2 (IMU1, IMU2, baros, mag, GPS) con
+                su marca de tiempo de la avionica
+              - las salidas del GNC a 100 Hz (navegacion, fase, estado, error,
+                apogeo previsto, mando del aerofreno)
+              - los eventos: cambios de fase, ordenes de despliegue (1A/1B),
+                comandos de subida recibidos y denegados, reinicios del EKF
+              - los railes de power y la continuidad de los pirotecnicos
+            DECISIONES QUE HAY QUE TOMAR ANTES DE ESCRIBIR CODIGO:
+              - FORMATO BINARIO, no CSV: a 100 Hz el CSV son ~12 KB/s de texto
+                y formatearlo cuesta CPU en el mismo bucle del GNC. Y si se usa
+                el MISMO formato de registro que VUELO.BIN, un vuelo grabado se
+                puede volver a reproducir tal cual con SIMULAR RUTA, que es la
+                mejor herramienta que vamos a tener para analizar un vuelo.
+              - LAS DOS SD, para no perder el vuelo por una tarjeta.
+              - QUE NO BLOQUEE EL BUCLE: escribir en la SD puede tardar
+                decenas de ms (ya se vio un paso del GNC de ~10 ms). Buffer
+                grande en RAM y escritura por bloques, medir cuanto bloquea
+                cada volcado y que el GNC no pierda ventanas.
+                MEDIDO 2026-10-05 (App/sd_bench.c, simulacion del registro:
+                400 Hz x 256 B = 100 KB/s, bloques de 16 KB, flush cada 1 s):
+                  a 625 kHz NO SIRVE: 56 ms por bloque, 1764 de 8000 ticks
+                    llegan mas de 20 ms tarde (el GNC no los recupera).
+                  a 20 MHz SI: 3,2 ms por bloque (max 5,7), flush 1,5 ms (max
+                    10,6), 6 de 8000 ticks pierden uno, ninguno pasa de 8 ms.
+                  Reservar el archivo antes (fx_file_allocate, 8 MB en 5,6 ms)
+                  baja el flush de 11 a 2 ms de media.
+                  Cada escritura cuesta ~0,8 ms fijos + ~0,14 ms por KB: a
+                  20 MHz caben de sobra 400 Hz con registros de hasta ~1 KB.
+              - SOBREVIVIR A UN CORTE DE CORRIENTE: volcar (flush) cada poco,
+                y un archivo por arranque con el contador de arranques en el
+                nombre, para que un reinicio en vuelo no machaque lo anterior.
+              - CUANDO: grabar siempre desde el arranque, o solo a partir de
+                READY / del despegue. Lo primero gasta tarjeta en tierra; lo
+                segundo pierde lo que paso justo antes del despegue. Un
+                buffer circular de unos segundos antes del despegue da las dos
+                cosas.
+              - LAS SIMULACIONES NO SON VUELOS: si se graba durante una
+                simulacion, que quede marcado en el archivo, o se acabara
+                analizando una simulacion como si fuera el vuelo.
+            Relacionado con la entrada siguiente (estado que sobrevive a un
+            reinicio): son cosas distintas, el registro es para analizar
+            despues; el estado es para que el cohete sepa por donde iba.
+
+[ ] IMPL    REGISTRO DE ESTADO DE VUELO QUE SOBREVIVA A UN REINICIO DEL CORE.
+            Si el core se reinicia en vuelo (bajon de tension, watchdog), hoy
+            arranca de cero: fase IDLE, EKF sin alinear, altura 0 y el
+            aerofreno recogido, en mitad del vuelo. No tiene forma de saber que
+            ya habia despegado.
+            QUE GUARDAR, como minimo: fase de vuelo, estado del cohete, altura
+            de referencia (presion base), si ya ha despegado y cuando, y si los
+            pirotecnicos ya se han disparado. Eso ultimo es lo mas delicado: un
+            reinicio no puede provocar que se vuelva a disparar un paracaidas
+            ya desplegado, ni que se deje de disparar uno pendiente.
+            DONDE: la SD es lenta y se puede corromper a media escritura; mirar
+            RTC backup registers del H7 (sobreviven al reset, se pierden al
+            cortar la alimentacion) o la flash interna. Probablemente los dos:
+            backup registers para lo rapido y SD para el historico.
+            CUIDADO con el criterio de recuperacion: reanudar en la fase
+            guardada es peligroso si el dato es viejo o de OTRO vuelo. Hace
+            falta marca de tiempo y alguna forma de invalidarlo en tierra.
+            Relacionado con la deteccion de reinicios que ya hace la estacion
+            (ver UMBRAL_CORTE): desde tierra se ve el corte, pero el cohete no
+            se entera de nada.
+
+[ ] IMPL    QUE EL RESTO DE PLACAS AGUANTEN UN REINICIO EN VUELO (power,
+            avionica, RF). Va junto con la entrada anterior: lo del core no
+            sirve de nada si un reinicio de otra placa tambien pierde el vuelo.
+            Lo que pasa HOY con cada una (revisado 2026-10-02):
+              - TODAS: al arrancar se quedan esperando el wake up sin hacer
+                nada. El core lo repite cada 2 s, asi que hasta 2 s ciegas
+                ademas de lo que tarden en arrancar. Decidir si en vuelo deben
+                arrancar trabajando sin esperar.
+              - POWER: un reinicio corta un canal que estuviera encendido (los
+                pines arrancan a 0). El core solo repite la orden mientras la
+                bandera del GNC vale 1, que es el PRIMER SEGUNDO de la fase:
+                si power se reinicia justo entonces, entre arrancar y el wake
+                up se pierde todo ese segundo y EL PARACAIDAS NO SE DISPARA.
+                despliegue.c deberia seguir reintentando hasta ver perdida la
+                continuidad del canal, o durante una ventana mas larga.
+                (La prueba que quemaba los cuatro canales al arrancar ya esta
+                quitada: ver arriba.)
+              - AVIONICA: pierde los offsets de calibracion (solo RAM): desde
+                ese momento las IMU llegan SIN calibrar. El reloj de los
+                timestamps vuelve a 0 (el core lo detecta como reset, pero el
+                EKF ve un salto de tiempo). El servo arranca SIN PULSOS hasta
+                la primera orden: queda suelto, el aerofreno donde lo deje el
+                aire. Y el GPS se vuelve a configurar (CFG-VALSET al arrancar).
+              - RF: la radio se reconfigura y vuelve en cuanto llega el wake
+                up; se pierde telemetria ese rato. Es la que menos importa.
+            Probarlo: con todo en marcha y una simulacion, reiniciar cada placa
+            (boton de reset) y ver que el vuelo sigue.
+
+[x] RESUELTO UNA PLACA QUE SE REINICIABA SE QUEDABA MUDA PARA SIEMPRE. Es el
+            agujero mas serio encontrado hasta ahora y se descubrio de rebote
+            al grabar la RF (2026-10-01).
+            QUE PASABA: _wake_up_retry() dejaba de mandar CMD_WAKE_UP en cuanto
+            las tres placas habian contestado UNA VEZ. Una placa que se
+            reiniciara despues esperaba un wake up que no iba a llegar nunca, y
+            como no estaba despierta descartaba todo lo que le llegaba. El core
+            no se entera de nada: seguia diciendo "rf OK", encolando paquetes
+            (5527) y contando CERO errores, mientras por el aire no salia nada.
+            EN VUELO: una RF que se reinicie por un bajon de tension se lleva la
+            telemetria para siempre. Lo mismo con power o avionica.
+            ARREGLO: el wake up pasa a ser un LATIDO, cada 2 s aunque esten
+            todas despiertas (SYS_WAKE_UP_KEEPALIVE_PERIOD_MS). Comprobado que
+            es seguro leyendo las tres: el WAKE_UP_ACK es INCONDICIONAL en las
+            tres, o sea que contestan a todos los latidos, no solo al primero;
+            la avionica ademas reenvia su INIT_STATUS con cada uno (power y rf
+            no, porque aun no lo implementan). Ninguna reinicia sensores ni
+            recalibra. Coste: 5 tramas cada 2 s (1 wake up + 3 ACK + 1
+            INIT_STATUS) = 2,5 tramas/s en un bus que hoy mueve 2 por segundo.
+            El comentario viejo del codigo decia que una placa reiniciada "se
+            recupera sola", y era FALSO justo en el caso que importa.
+            Actualizado el ICD 6.1.
+
+[ ] PROBAR  QUE EL LATIDO DEL WAKE UP RECUPERA DE VERDAD una placa reiniciada:
+            con todo funcionando, resetear la RF y ver que la telemetria vuelve
+            sola en menos de 2 s, sin tocar el core.
+
+[x] PROBAR  ENLACE DE SUBIDA VERIFICADO DE PUNTA A PUNTA (2026-10-01). El
+            cohete contesta a "pedir estado" mandado por radio desde el PC:
+              estacion -> puente -> LoRa -> RF -> CAN1 0x241 -> uplink.c ->
+              rf_telemetry -> CAN1 0x140 -> RF -> LoRa -> estacion
+            Consola del core: "Subida recibidos 1  validos 1  rechazados 0
+            desconocidos 0". Cero rechazados: la marca y el XOR no tuvieron que
+            descartar nada.
+
+[x] MEDIDO  TASA DE ACIERTO DE LA SUBIDA: 30 % (9 de 30 comandos, 2026-10-01),
+            latencia 78 ms de mediana. Hacen falta 3,3 intentos de media para
+            que uno llegue.
+            NO ES UN FALLO, es geometria: la RF esta sorda mientras transmite.
+            Con telemetria a 15 Hz transmite 30,9 ms de cada 66,7, y un comando
+            de 4 bytes ocupa el aire 15,5 ms. La ventana en la que el comando
+            se pierde es 30,9 + 15,5 = 46,4 ms de cada 66,7, o sea el 70 %.
+            Queda el 30 % medido, que cuadra clavado con la teoria.
+
+[x] DECIDIDO (2026-10-01): EN EL CODIGO FINAL LA TELEMETRIA VA A 1 Hz SALVO EN
+            VUELO. Con eso queda resuelta la perdida de comandos de la subida
+            en tierra, que es donde se mandan, y no se trabaja mas en ella
+            mientras tanto (los 15 Hz de ahora son solo para pruebas).
+            Cuando se haga, revisar de paso: RF_TELEMETRY_RATE_HZ, el reparto
+            en rf_telemetry.c, el ciclo de trabajo, y que la estacion no
+            espere 15 Hz en ningun sitio (cadencia de la cabecera, ventana de
+            "enlace vivo" SILENCIO_ENLACE_S = 2 s, que a 1 Hz quedaria justo;
+            UMBRAL_CORTE en paquetes, que a 1 Hz son 32 s; FRESCURA_TEST_S
+            sigue valiendo porque en modo test el estado va a 1 Hz aparte).
+[ ] (contexto) LA MAQUINA DE CADENCIAS ARREGLA TAMBIEN LA FIABILIDAD DE LA SUBIDA,
+            no solo el ciclo de trabajo. A 1 Hz en tierra la RF solo esta sorda
+            46,4 ms de cada 1000, o sea un 4,6 %: la subida pasaria del 30 % al
+            95 % de acierto. Y en tierra es justo CUANDO SE MANDAN COMANDOS
+            (armar en la rampa); en vuelo no se manda nada.
+            O sea que la cadencia pendiente (1 Hz en tierra, 15 Hz tras el
+            despegue, 1 Hz en recuperacion) no es solo para no pasarse del
+            ciclo de trabajo: es lo que hace util el enlace de subida. Hacerla
+            antes de meter ningun comando que importe.
+
+[x] RESUELTO LA VENTANA DE MEDIDA DE LOS BUSES ERA DE 1 s Y CAN1 VA A RAFAGAS.
+            El latido del wake up mete 4 tramas de golpe cada 2 s sobre una
+            base de 2/s, asi que midiendo un segundo salia 2 o 6 segun tocara,
+            con la media real en 4: un +/-50 % de capricho en un numero que se
+            manda de uvas a peras. Ventana subida a 4 s (VENTANA_HZ_MS), que
+            cubre dos latidos enteros. Comprobado: ahora da 4 clavado mientras
+            el contador crudo alterna 6-1-7-2-5-3-6-2.
+            CAN2 daba igual con cualquier ventana: 837 tramas/s constantes.
+
+[x] RESUELTO 26 NO ES UNA LONGITUD VALIDA DE CAN FD. El paquete de estado se
+            diseno con 26 bytes de campos. CAN FD solo admite 0-8, 12, 16, 20,
+            24, 32, 48 y 64: el driver (can_driver.c, _dlc_to_bytes) rellena
+            con ceros hasta el siguiente valido, asi que salio al aire como 32
+            y la estacion lo tiraba por longitud. Se dejo en 32 declarados, con
+            los bytes 25 a 31 reservados a cero. Comprobado en el aire:
+              a5 01 00 0f 5f 7f 3f 3e 09 eb 00 6d 07 ... 00 (32 B)
+            Si algun dia se anade otro paquete, elegir la longitud de la lista.
+
+[x] RESUELTO UN BUS SIN MEDIR Y UN BUS MUERTO DABAN EL MISMO CERO. El primer
+            paquete de estado salia tan pronto tras el arranque que la ventana
+            de medida de un segundo aun no habia terminado, y decia 0 tramas/s
+            en los dos buses con CAN2 moviendo 800. Se anadio
+            status_packet_medido() y el arranque espera a que haya medida.
+
+[x] RESUELTO UN REINICIO DEL COHETE SE CONTABA COMO PERDIDA MASIVA. Al
+            reiniciarse el core, el contador del paquete de vuelo vuelve a 0 y
+            el salto se sumaba a "perdidos": la cabecera enseñaba PERDIDOS 248
+            sin haberse perdido nada. Ahora un hueco mayor que UMBRAL_CORTE
+            (32 paquetes, ~2 s a 15 Hz) se cuenta aparte como CORTE y se anota
+            en el registro. Los huecos cortos siguen siendo perdidas de
+            verdad, que es lo unico que vale para estimar la calidad del
+            enlace.
+
+[x] IMPL    MODO TEST Y PIROTECNICOS DESDE TIERRA (2026-10-01). Es el PRIMER
+            camino del firmware que puede encender un pirotecnico por una orden
+            de fuera (nadie llamaba a sys_pyro_fire_* hasta ahora), asi que
+            todas las protecciones estan en App/uplink.c:
+              - modo test SOLO en tierra: estado POWER ON, MANTENIMIENTO o
+                ERROR y fase IDLE o EN TIERRA. NUNCA en READY ni en vuelo
+              - si el GNC sale de tierra en modo test, cae en ese mismo paso
+              - caduca solo a los 120 s; la estacion lo renueva cada 5 s
+                mientras el panel este abierto (hombre muerto)
+              - pirotecnico SOLO dentro del modo test
+              - cada denegacion se avisa a tierra con un paquete de estado
+            En la estacion: boton MODO TEST abajo; el panel de pruebas
+            sustituye al RECORRIDO; los botones de disparo SOLO se habilitan
+            cuando un paquete de estado reciente (<3 s) CONFIRMA el modo test;
+            cada disparo pide dos clics y manda una rafaga de 5 (83 % de
+            llegar con el 30 % de acierto medido).
+            Paquete de estado v2: bytes 25-28 con modo test, segundos
+            restantes, ultimo pirotecnico, aceptados y denegados.
+            VERIFICADO CONTRA EL COHETE, SIN DISPARAR NADA (canal 9, que no
+            existe): pirotecnico sin modo test -> denegado; modo test entra,
+            manda estado a 1 Hz, canal invalido denegado, sale y deja de
+            mandar. 9 de 9.
+            Simulado con --demo-tierra: un clic no dispara, el armado caduca a
+            los 3 s, el iniciador pierde la continuidad tras disparar, y en
+            READY se deniega y el panel explica por que.
+
+[x] IMPL    SIMULAR RUTA DESDE TIERRA (2026-10-01). Boton en OTRAS PRUEBAS del
+            panel de pruebas (dos clics). El cohete vuela VUELO.BIN de la SD1
+            y la radio manda a tierra lo que va saliendo, como en un vuelo de
+            verdad, para ver en la estacion que mandaria el cohete.
+            Para eso gnc_playback.c ya NO BLOQUEA: _abrir/_paso/_cerrar, con
+            gnc_playback_update() dando en cada vuelta los pasos que tocan por
+            el reloj (como mucho 10 si va con retraso, para no dejar a la radio
+            sin turno). gnc_playback_run() sigue existiendo para el modo de
+            arranque.
+            Mientras simula:
+              - gnc_set_replay(true): sensor_board.c deja de pasar las medidas
+                reales al GNC y gnc_update() no da pasos
+              - el modo test SE CIERRA al empezar, y pirotecnicos y modo test
+                se deniegan (UPLINK_DENEGADO_SIMULANDO), dos cerrojos
+              - paquete de estado por segundo con el avance; la estacion pone
+                "SIM nn %" en la cabecera y limpia las graficas al empezar
+              - el aerofreno SE MUEVE DE VERDAD
+            Paquete de estado v3: bit 4 del byte 25 (simulando), byte 29
+            (avance) y byte 30 (motivo de la ultima denegacion, para que tierra
+            diga POR QUE no se hizo algo).
+            Probado en el simulador de la estacion (15 de 15). En el cohete,
+            pendiente: ver la siguiente entrada.
+
+[ ] REVISAR UN PASO DEL GNC DE ~10 ms DE VEZ EN CUANDO. En regimen va a 131 us
+            por paso, pero la consola enseña un maximo de 9,3 a 10,9 ms segun
+            el arranque (2026-10-01: "ultimo 9263 us" en el paso 1761, max
+            10893). Pasa del periodo de 10 ms, o sea que esa vuelta se pierde
+            una ventana. Ya salia antes de la simulacion de ruta (max 9342),
+            no lo ha traido eso. Averiguar que paso es: si es el fin del
+            alineamiento del EKF, o algo de fuera que interrumpe durante la
+            medida (la medida es con el contador de ciclos alrededor de
+            gnc_step_now).
+
+[x] PROBAR  SIMULAR RUTA CONTRA EL COHETE (2026-10-01). Con la estacion de
+            verdad: modo test confirmado en 0,2 s, simulacion en 0,6 s, parada
+            en 0,8 s, todo al primer intento. VUELO.BIN esta en la SD1 (21001
+            pasos). Secuencia igual que la referencia de Simulink: READY a los
+            ~3 s (ARMAR del archivo) y EN VUELO a los ~5 s, sin errores. Al
+            parar vuelve a POWER ON / IDLE sin error.
+
+[x] RESUELTO gnc_init() EN CALIENTE NO REINICIABA LA MAQUINA DE ESTADOS NI LA
+            GUIA. Salia "NAV INVALIDA DEMASIADO TIEMPO" (error 1) en toda
+            simulacion. Embedded Coder genera StateMachine_initialize() y
+            GuidanceControl_initialize() VACIAS ("no initialization code
+            required") porque da por hecho que su memoria empieza a cero, y a
+            cero la deja el arranque del micro. Pero la simulacion llama a
+            gnc_init() con el cohete ya en marcha: la navegacion se reiniciaba
+            (su _initialize si copia condiciones iniciales) y la maquina de
+            estados NO, asi que seguia recordando que la navegacion "ya habia
+            sido valida". Con eso su umbral de navegacion perdida es 1 s y no
+            60, y los 2 s de alineamiento la mandaban a ERROR con el codigo 1;
+            al detectar el despegue del archivo pasaba a EN VUELO arrastrando
+            el error, que en EN VUELO no se borra nunca.
+            Y LO PEOR: al acabar la simulacion el cohete real se quedaba en el
+            estado simulado, creyendo que ya habia volado.
+            Arreglo: gnc_init() pone a cero DW, U e Y de los tres modelos antes
+            de los _initialize(), que es exactamente como estan al encender.
+            OJO al regenerar el GNC: si algun modelo nuevo tiene condiciones
+            iniciales que no sean cero, su _initialize() las pondra despues
+            del memset, que es el orden correcto. No quitar el memset.
+            Primero se sospecho de un reinicio del EKF por NaN; se descarto
+            midiendo: se añadio a la reproduccion un aviso en cada cambio de
+            nav_valid y no hubo ninguno en todo el vuelo. El aviso se queda.
+
+[x] RESUELTO LOS REINTENTOS DE LA ESTACION ESTABAN EN FASE CON LA TELEMETRIA.
+            Reintentar cada 1,000 s exactos son 15 periodos justos de 66,67 ms
+            (15 Hz): todos los reintentos caen en la misma fase, y si el
+            primero cae en la ventana en que la RF esta sorda, caen ahi todos.
+            Medido contra el cohete: 0 de 40 peticiones llegan con espaciado
+            fijo de 1 s, 7 de 40 con espaciado al azar. La peticion automatica
+            cada 5 s tenia el mismo problema (75 periodos). Se noto porque
+            arrancar la simulacion costo 16 intentos, cuando el core solo
+            habia recibido 3 comandos en total.
+            Arreglo: todos los reintentos pasan por _con_jitter() en
+            estacion.py, +/-25 % al azar. Las rafagas de 150 ms no lo
+            necesitan: 150 ms son 2,25 periodos y ya reparten la fase.
+            ES LA SEGUNDA VEZ QUE PASA (la primera fue el ping cada 400 ms =
+            6 periodos). Cualquier cosa periodica que se mande por la subida
+            tiene que llevar jitter.
+
+[-] APLAZADO EL ACIERTO DE LA SUBIDA CON FASE AL AZAR SALE 18 % (7 de 40) Y NO
+            EL 30 % QUE DA LA CUENTA. Puede ser estadistica (con 40 intentos,
+            1,7 sigmas por debajo) o algo mas, como que los paquetes de estado
+            de 32 bytes ocupen mas aire que los de vuelo. Repetir con mas
+            intentos antes de fiarse de ninguno de los dos numeros.
+            APLAZADO: a 1 Hz en tierra la RF esta sorda el 4,6 % del tiempo y
+            esto deja de importar. Solo volver a mirarlo si a 1 Hz la subida
+            sigue fallando mas de lo que dice la cuenta (~95 % de acierto).
+
+[x] IMPL    DESPLIEGUE DE PARACAIDAS AUTOMATICO (2026-10-01), App/despliegue.c:
+              drogue_deploy_flag del GNC -> canal 1A
+              main_deploy_flag del GNC   -> canal 1B
+            DECIDIDO: es el flujo de vuelo y la SIMULACION PASA POR EL TAL
+            CUAL, sin ninguna rama "si se esta simulando", para validar en el
+            banco exactamente el codigo que va a volar. CONSECUENCIA: UNA
+            SIMULACION EN EL BANCO ENCIENDE DE VERDAD 1A Y 1B. Simular con
+            cargas de prueba (LED, resistencia), nunca con cargas reales.
+            (Esto sustituye a lo que habia apuntado antes, que la logica de
+            despliegue debia mirar gnc_replay_activa(): se decidio lo
+            contrario a proposito.)
+            Como funciona:
+              - el GNC da cada bandera a 1 durante el PRIMER SEGUNDO de su
+                fase (GuidanceControl.c, fases 5 y 6)
+              - mientras vale 1 se repite la orden cada 200 ms (5 en el
+                segundo): una trama de CAN perdida no cuesta un paracaidas;
+                repetir solo reinicia el segundo de encendido de power
+              - si power rechaza la orden se reintenta a los 20 ms
+              - solo con la maquina de estados en EN VUELO: una bandera
+                espuria en tierra no enciende nada. La simulacion pasa por EN
+                VUELO como un vuelo de verdad, asi que no le quita nada
+              - se olvida en cada gnc_init() (vuelo o simulacion nueva)
+            Los pirotecnicos MANDADOS DESDE TIERRA siguen denegados durante
+            la simulacion; lo automatico no.
+            Paquete de estado v4: byte 31 (1A mandado, 1B mandado, power
+            rechazo alguna). ERA EL ULTIMO BYTE LIBRE del paquete de estado.
+            Probado en el simulador de la estacion. CONTRA EL COHETE NO, a
+            proposito: es la siguiente entrada.
+
+[ ] IMPL    SIMULACION EN LAZO CERRADO (HIL), para mas tarde. SIMULAR RUTA es
+            LAZO ABIERTO: VUELO.BIN trae los sensores ya grabados, el GNC mueve
+            el servo de verdad pero la trayectoria no se entera (se vio: con el
+            aerofreno al 100 % el error de apogeo seguia subiendo hasta +245 m).
+            Los datos grabados llevan el efecto del aerofreno de la REFERENCIA
+            de Simulink (fuera de 12,05 a 27,27 s), no del nuestro: mientras
+            nuestro GNC decida parecido es casi coherente, en cuanto cambie la
+            ley de control deja de serlo.
+            Sirve para validar el flujo (GNC en tiempo, servo, fases,
+            despliegue, telemetria) pero NO si el aerofreno consigue el apogeo.
+            Para eso: un modelo de la dinamica del vuelo (en el PC) que reciba
+            el mando REAL del aerofreno, integre la trayectoria con su
+            resistencia y genere los sensores del paso siguiente, metiendolos
+            al core por CAN2 como si fuera la avionica. Hace falta un modelo de
+            resistencia del aerofreno, que depende del mapeo servo -> angulo
+            efectivo que ya esta pendiente.
+
+[x] PROBAR  (hecho segun el usuario 2026-10-06) DESPLIEGUE AUTOMATICO CONTRA EL COHETE, con cargas de prueba en 1A
+            y 1B. Lanzar SIMULAR RUTA entera (210 s) y comprobar:
+              - 1A se enciende al entrar en DROGUE (~t=32 s del archivo) y 1B
+                al entrar en MAIN (~t=152 s); ~2 s cada uno (5 ordenes cada
+                200 ms, mas el segundo de power tras la ultima)
+              - la consola del core: "DESPLIEGUE drogue 1A: 5 ordenes  main
+                1B: 5 ordenes  rechazadas 0", y lo mismo en VUELORES.TXT
+              - la estacion: "DROGUE: el cohete enciende 1A" y "MAIN: ... 1B"
+            Ojo: el aerofreno tambien se mueve, como siempre que se simula.
+
+[ ] REVISAR EL REGISTRO DE VUELO QUE SOBREVIVA A REINICIOS (pendiente de antes)
+            TIENE QUE GUARDAR SI 1A Y 1B YA SE HAN MANDADO. Hoy despliegue.c lo
+            olvida en cada gnc_init(), que es lo correcto para una simulacion,
+            pero un reinicio del core en vuelo despues del drogue no puede
+            volver a empezar como si no hubiera pasado nada. Y no puede
+            guardar el estado de una SIMULACION como si fuera un vuelo.
+
+[ ] DECIDIR EL PAQUETE DE ESTADO YA NO TIENE BYTES LIBRES (32 de 32 tras la
+            version 4). Lo siguiente que haya que mandar obliga a elegir: un
+            paquete de estado mas largo (48 es la siguiente longitud valida de
+            CAN FD), o un tercer tipo de paquete.
+
+[x] PROBAR  (hecho segun el usuario 2026-10-06) DISPARO REAL DE UN PIROTECNICO DESDE TIERRA. Lo unico del modo
+            test que no se ha probado contra hardware, a proposito: no se
+            manda una orden de encendido a la placa sin decidirlo una persona
+            y con algo conocido en el canal (un LED con resistencia, una
+            lampara, una resistencia de prueba en lugar del iniciador).
+            Comprobar: el canal se enciende ~1 s, la consola del core cuenta
+            "pirotecnicos aceptados", y si hay iniciador la continuidad
+            desaparece en el paquete de vuelo.
+
+[ ] DECIDIR SI EL MODO TEST DEBE ADMITIRSE EN READY. Hoy NO, a proposito: en
+            READY el detector de despegue esta armado y no se sabe que hay
+            conectado a cada canal (podria ser el encendido del motor). Si
+            alguna prueba necesita hacerse en READY, que sea una decision
+            explicita y se cambie _en_tierra() en uplink.c Y admite_modo_test
+            en tools/estacion/paquete.py, que es su espejo.
+
+[ ] IMPL    ENCENDER LOS COMANDOS DE LA ESTACION. El camino de subida YA
+            EXISTE; lo que falta es que esos comandos existan en el cohete. En
+            uplink.c solo esta 0x01 (pedir estado). Anadir ARMAR, DESARMAR,
+            ABORTAR y REARMAR es un case mas en _ejecutar() y rellenar el
+            command= de cada boton en estacion.py.
+            PERO ANTES HAY QUE DECIDIR LO DE LA SECUENCIA: el formato de 4
+            bytes de hoy no la lleva, y los comandos actuales se salvan solo
+            porque son IDEMPOTENTES (pedir el estado dos veces no hace dano).
+            Un comando de pirotecnia no lo es. Como la subida no tiene acuse y
+            tierra repite, hace falta numero de secuencia antes de meter
+            cualquier comando que cambie algo de verdad.
+
+[ ] IMPL    RELLENAR LAS RANURAS RESERVADAS de la estacion (V01..V24: GPS,
+            satelites, barometros, IMU, railes de la power, servo, Mach...) y
+            el panel LIBRE. Casi todas piden datos que el paquete de 24 bytes
+            no lleva todavia, asi que van despues de decidir si se amplia el
+            paquete o se manda un segundo tipo de paquete mas lento.
+
+[ ] REVISAR nav_valida DICE QUE EL FILTRO SE CREE SUS NUMEROS, NO QUE SEAN
+            CIERTOS. En el banco del 2026-09-28, con la avionica sin GPS, el
+            paquete llegaba con nav OK, la altura por -350 m y el cabeceo
+            cayendo 1,7 grados/s, todo con la placa quieta sobre la mesa. La
+            estacion lo pinta tal cual porque es lo que manda el cohete. Hace
+            falta o arreglar el !gps de la avionica o que el cohete mande algun
+            indicador de deriva (edad del ultimo GPS, traza de la covarianza).
+
+[ ] IMPL    poc/radio_ping/main.c (rf_g4_v0) se escribio para el lado que pregunta
+            antes de saber que la estacion de tierra es la Blue Pill. No se usa hoy,
+            pero vale tal cual si algun dia se hace la prueba entre dos rf_g4_v0.
+            Decidir si se conserva o se borra.
+[x] PROBAR  Enlace de eco verificado en el banco (2026-09-24): 30/30 ecos, 0 perdidos,
+            ida y vuelta 130 ms. LINEA BASE a ~1 m:
+              ida    (el cohete nos oye)    RSSI -62 dBm   SNR +12
+              vuelta (nosotros le oimos)    RSSI -27 dBm   SNR +12
+            El SNR sale saturado en los dos sentidos: LoRa lo corta en torno a
+            +13 dB, asi que en corto no distingue nada. El RSSI es lo unico util.
+[x] PROBAR  EL LNA DEL COHETE ATENUA 16 dB EN VEZ DE AMPLIFICAR (2026-09-24).
+            Medido alternando el LNA paquete a paquete desde poc/radio_echo
+            (LNA_AB_TEST), 30 muestras de cada estado, dispersion +/-1 dB:
+              LNA apagado    RSSI -46 dBm   SNR 12
+              LNA encendido  RSSI -62 dBm   SNR 12
+            Un amplificador NO puede bajar el RSSI: se mide a la entrada del
+            chip, o sea DESPUES del LNA, asi que con ganancia deberia subir. El
+            camino "con LNA" tiene 16 dB mas de perdida que el de bypass.
+            Explica casi la mitad de la asimetria de 36 dB del enlace: sin LNA
+            el cohete nos oiria a -46 en vez de -62.
+            CAVEAT: el SNR sale 12 en los dos casos, pero eso NO demuestra nada
+            aqui, porque LoRa lo satura en torno a +13 dB y a estas distancias
+            los dos estan muy por encima del umbral. La prueba de si el LNA
+            ayuda o estorba a la SENSIBILIDAD hay que repetirla lejos, con
+            senal debil, mirando paquetes perdidos.
+[x] REVISAR Esquematico del LNA visto (2026-09-24). Es un TSY-83LN+ (U8), con
+            RF-IN (pin 2) a la antena y RF-OUT (pin 8) al SX1262: esta BIEN
+            ORIENTADO, asi que queda descartado lo del amplificador del reves.
+            Lo que salta a la vista es el pin 12, IADJ, SIN CONECTAR (marcado con
+            una X roja). En los amplificadores de Mini-Circuits con pin IADJ ese
+            pin fija la corriente de polarizacion, normalmente con una resistencia
+            a masa. Al aire, si la pieza no trae valor por defecto interno, el
+            amplificador no se polariza: no da ganancia y la senal se cuela con
+            perdida. Un LNA sin polarizar que atenua 16 dB encaja del todo, y
+            explica que encender el VEN no sirva de nada.
+            Segundo hallazgo: la red de adaptacion parece de otra frecuencia. A
+            869 MHz C55 (0,5 pF) son 366 ohm, C56 (0,4 pF) 458 ohm, L12 (22 nH)
+            120 ohm y el choque L11 (39 nH) 213 ohm. Son valores flojisimos para
+            esta banda; a 2,4 GHz serian razonables. Parece copiada del montaje de
+            evaluacion del datasheet sin readaptar. No explica por si sola 16 dB de
+            perdida neta (harian falta ~36 dB de desadaptacion) pero suma.
+[x] REVISAR CAUSA CONFIRMADA CON EL DATASHEET (2026-09-24): VEN esta a 3,3 V y
+            tiene que estar a 5 V.
+            El TSY-83LN+ dice en la nota 11: "VEN must be equal to VDD in Amplifier
+            - ON mode", y la tabla da VEN = +5 V para amplificar y 0 V para bypass.
+            Pero SX1262_LNA_ENABLE sale de un GPIO del STM32G4 (3,3 V) y va directo
+            al pin 11 por R16 de 0 ohm: nunca llega a los 5 V que exige.
+            Esto explica la medida al detalle. A 400 MHz y VDD 5 V el datasheet da
+            +21,2 dB amplificando y -1,6 dB en bypass:
+              pin bajo  = VEN 0 V   = bypass legitimo, -1,6 dB  -> nuestro -46 dBm
+              pin alto  = VEN 3,3 V = estado indefinido          -> 16 dB peor
+            O sea que NUNCA hemos tenido los 21 dB de ganancia: estabamos eligiendo
+            entre bypass y roto. Hay ~22 dB de sensibilidad sobre la mesa.
+            DESCARTADAS mis dos sospechas anteriores, las dos por el datasheet:
+              - IADJ al aire es lo CORRECTO ("Gain is nominal when IADJ is left
+                open"; en la placa de evaluacion RIADJ va sin montar),
+              - la red de adaptacion es la de la placa de evaluacion Figura 2
+                componente a componente (100 pF, 39 nH, 22 nH, R1 0 ohm), y esta
+                caracterizada de 0,4 a 6 GHz, asi que 869 MHz entra de lleno.
+[x] PROBAR  LNA con VEN a 5 V inyectados a mano (R16 levantada), 2026-09-24: SIGUE
+            SIN AMPLIFICAR. Normalizando con ida - vuelta, que cancela trayecto y
+            antenas por reciprocidad (los dos numeros salen del mismo paquete):
+              VEN 0 V  (bypass)  -21 dB   <- el mejor de los tres
+              VEN 3,3 V          -36 dB   15 dB peor
+              VEN 5 V            -40 dB   19 dB peor
+            O sea que subirlo a 5 V no solo no lo arregla: lo deja 4 dB peor.
+            Probados los tres estados posibles de VEN y en ninguno da ganancia, asi
+            que el nivel de VEN explicaba una parte pero no toda la historia.
+            Metodo validado: la diferencia bypass/3,3 V sale 15-16 dB, igual que la
+            prueba A/B alternando paquete a paquete.
+            NOTA: una lectura intermedia dio -29 dB y se descarta, se tomo con las
+            placas medio manipuladas (la vuelta bailo 12 dB mientras la ida no se
+            movia). Y el resumen acumulado "LNA del cohete" de la consola de la
+            Blue Pill dejo de tener sentido al levantar R16: las etiquetas ya no
+            corresponden con el estado real.
+[ ] PROBAR  LO UNICO QUE QUEDA, y es de un minuto con el polimetro. Por radio ya no
+            se puede distinguir "pieza muerta" de "alimentacion que no llega":
+              - consumo de la linea de +5 V del LNA (datasheet: 76 mA amplificando,
+                3 mA en bypass; ~0 = no esta viva),
+              - tension en el PIN 11 (VEN), medida en el pin,
+              - tension en el PIN 9 (VDD), para confirmar que los 5 V pasan L11.
+            Si hay 5 V en los dos pines y el consumo es cero, el TSY-83LN+ esta
+            danado. Es plausible: ha estado funcionando con VEN a 3,3 V, fuera de
+            especificacion, y el datasheet avisa de que saltarse el secuenciado de
+            encendido puede danarlo de forma permanente.
+[ ] IMPL    ARREGLO (hardware, siguiente revision de la placa): adaptador de nivel
+            para VEN. Un pull-up NO vale: IEN son 4,5 mA y cae demasiada tension.
+              - una pieza: buffer alimentado a 5 V con umbrales TTL (74HCT1G125 o
+                74HCT1G08); con VIH de 2 V acepta los 3,3 V del micro,
+              - o discretos: P-MOS en alto lado con la puerta tirada por un N-MOS.
+            Conservar el bypass CONMUTABLE, no atar VEN a 5 V fijo: la entrada
+            aguanta +22 dBm amplificando y +29 en bypass, asi que bajar a bypass
+            mientras se transmite a 22 dBm protege la pieza, que es justo para lo
+            que existe ese modo.
+            Respetar el secuenciado del datasheet: VDD y VEN a la vez, y la RF
+            despues. Dice que saltarselo puede danar la pieza permanentemente.
+[ ] REVISAR En la placa de evaluacion el inductor de 22 nH va en la ENTRADA y en
+            nuestro esquematico L12 parece estar en la SALIDA. Puede ser cosa del
+            dibujo, pero comprobarlo en la PCB.
+[ ] DECIDIR  Mientras no se aclare
+[ ] DECIDIR  Mientras no se aclare: dejar de encender el LNA en recepcion
+            (board_rf_switch_set_rx en bsp/sx1262/bsp_sx1262.c). Es una linea y
+            recupera 16 dB de sensibilidad del cohete hoy mismo. No lo he
+            cambiado por mi cuenta porque toca la configuracion de vuelo y
+            conviene mirar antes el esquematico.
+[ ] REVISAR ASIMETRIA DE 36 dB entre los dos sentidos, con las dos placas pedidas a
+            22 dBm. Y es peor de lo que parece: la placa del cohete tiene un LNA
+            externo que se enciende en recepcion (board_rf_switch_set_rx), asi que
+            el -62 que reporta ya lleva la ganancia del LNA dentro; en su antena
+            llega bastante menos.
+            Descartado: las antenas (una antena mala atenua igual al transmitir y al
+            recibir, asi que se cancela en la asimetria); el regulador (se probo la
+            Blue Pill en LDO como el cohete y la ida no se movio de -66, se dejo en
+            DC-DC que es como venia y da 3 dB mejor); el camino de RX del cohete
+            (conmuta a RF2 y enciende el LNA, correcto).
+            Quedan como sospechosos: la potencia real que da el modulo DX-LR30, y su
+            conmutador de antena en TX. Ojo a esto ultimo: hasta hoy ese modulo SOLO
+            HABIA RECIBIDO, su camino de transmision estaba sin estrenar.
+[ ] DECIDIR Consecuencia practica: la direccion que importa para la telemetria es
+            cohete -> tierra, que es la FUERTE. La prueba de eco, en cambio, esta
+            limitada por la debil (tierra -> cohete), asi que cuando empiecen a
+            perderse ecos sera el enlace de SUBIDA el que muere, no el de telemetria.
+            Medida asi, la prueba INFRAVALORA el alcance util de telemetria.
+            Para el numero que de verdad interesa, la medida honesta es de un solo
+            sentido: el cohete emitiendo periodicamente y tierra escuchando. Las dos
+            mitades ya existen (app/radio_beacon.c y el receptor Arduino o
+            poc/radio_receiver).
+[x] IMPL    Radio a SF7 / BW 250 kHz en LAS DOS placas (2026-09-24), para la prueba
+            de alcance: la mitad de tiempo en el aire a cambio de 3 dB (71 % del
+            alcance). Verificado en mesa: 30/30 ecos, 0 perdidos, 0 CRC malos, e
+            ida y vuelta de 140 a 80 ms, que es justo el ahorro esperado.
+            Ciclo de trabajo a 1 Hz: ping ~2 %, eco ~3 %. Mucho margen para subir
+            la cadencia.
+            Cambiado en bsp/sx1262/bsp_sx1262.c (.bw) y en el sketch de la Blue
+            Pill (segundo parametro de radio.begin).
+[ ] DECIDIR AVISO REGULATORIO de lo anterior: la banda de 869,4 a 869,65 MHz mide
+            250 kHz JUSTOS, asi que con BW250 centrado en 869,525 se ocupa de borde
+            a borde y no queda guarda ninguna. Funciona (mas ancho de banda tolera
+            mejor el error de frecuencia, y tenemos 5,4 kHz entre placas) pero para
+            volar hay que decidir: volver a BW125, o bajar el SF en su lugar, que
+            da el mismo ahorro de tiempo por 2,5 dB en vez de 3 y sin salirse.
+[x] REVISAR CONFIRMADO (2026-09-24): la mejora de -40 a -17 dB al pasar a BW250 no
+            era el ancho de banda, era el LNA. El usuario dejo VEN atado a 0 V de
+            forma PERMANENTE por hardware, o sea bypass. Los 4 dB que quedan entre
+            el -21 medido en bypass a BW125 y el -17 de ahora entran en la
+            dispersion de las medidas y en como se reporta el RSSI con distinto
+            ancho de banda.
+            Resumen del caso del amplificador, cerrado:
+              VEN 0 V  (bypass)   -21 dB   <- configuracion buena, la que hay
+              VEN 3,3 V (diseno)  -36 dB      15 dB peor, era lo que hacia la placa
+              VEN 5 V             -40 dB      19 dB peor
+            La placa llevaba funcionando 15 dB por debajo de su mejor estado.
+[ ] REVISAR PRECAUCION PARA EL FUTURO: VEN esta atado a masa POR HARDWARE, y el
+            firmware ademas fuerza bypass (board_lna_bypass). Coinciden, asi que
+            hoy no hay conflicto ni importa si R16 esta puesta o levantada.
+            PERO si algun dia se monta el adaptador de nivel y se devuelve el
+            WritePin al set_rx(), HAY QUE QUITAR ANTES ESE CABLE A MASA: el micro
+            pondria el pin alto contra un corto. Marcarlo fisicamente en la placa.
+[x] PROBAR  Calibracion de frecuencia de la estacion de tierra (2026-09-24).
+            LOS CONDENSADORES DEL CRISTAL NO SE PUEDEN CALIBRAR en la Blue Pill: se
+            barrio XTA/XTB (0x0911/0x0912) de 0x02 a 0x1A y el error de frecuencia
+            no se movio de -5486 Hz, con 13 Hz de dispersion que es ruido. Leyendo
+            el registro de vuelta, la escritura SI se queda (escrito 0x20, leido
+            0x20), asi que o el modulo lleva TCXO (y XTA/XTB no hacen nada) o el
+            valor se reinicia durante la secuencia de transmision. No es una
+            palanca utilizable.
+            SE CALIBRA MOVIENDO LA FRECUENCIA, que si funciona: las dos direcciones
+            siguen el offset con pendiente ~1,0 Hz/Hz. Puesto un offset fijo de
+            -2000 Hz en el sketch (FREQ_OFFSET_HZ), que deja ida en -3305 Hz y
+            vuelta en -884.
+[ ] REVISAR SESGO DE 4,4 kHz entre los dos medidores de error de frecuencia. A lo
+            largo del barrido, ida + vuelta se queda constante en -4,4 kHz; si las
+            dos medidas fueran correctas serian iguales y opuestas y la suma daria
+            cero. Segun la ida el optimo esta en -5,0 kHz y segun la vuelta en
+            -1,1 kHz. Ademas la pendiente de la ida sale con el signo invertido
+            respecto al convenio esperado.
+            Sospechoso principal: read_freq_error_hz() en drivers/sx1262/sx1262.c,
+            escrito a mano. Revisar signo y posible sesgo contra RadioLib.
+            NO ES URGENTE: a BW250 el receptor tolera del orden de +/-60 kHz y el
+            error es de 5,5 kHz en el peor caso, menos del 10 % del margen.
+[ ] PROBAR  Salir a medir el alcance con las dos PoC y apuntar la linea base
+            (RSSI/SNR a distancia conocida y con vision directa).
+            RSSI -21 dBm, SNR +12 dB, 0 errores, con +22 dBm y SF7/BW125. La
+            sensibilidad a SF7 es -123 dBm, asi que hay ~100 dB de margen: en espacio
+            libre daria para varios km con vision directa.
+            Como medirlo: alejar la estacion de tierra por tramos anotando RSSI, SNR y
+            paquetes perdidos, con la antena del cohete en la orientacion de vuelo y
+            tambien girada (el cuerpo del cohete la tapa segun como caiga).
+            Si el margen se queda corto, subir el SF antes que la potencia: cada paso
+            de SF da ~2,5 dB y ya estamos en el maximo del chip.
+[-] DUPLICADO de la anterior: Radio en la banda nueva.
+[ ] DECIDIR Ciclo de trabajo total: baliza a 1 Hz = 4,1 % + lo que mande el core, sobre
+            el 10 % que permite la banda.
+[ ] DECIDIR Sync word 0x34 (LoRaWAN publico): la estacion de tierra debe usar el mismo.
+[ ] IMPL    Puente CAN <-> LoRa (borrado de poc/aplication): rehacer sobre la estructura nueva.
+[x] IMPL    CMD_RF_TRANSMIT (0x140, ICD 6.10): el core manda bytes y la RF los transmite
+            tal cual por LoRa. Core: App/sys_rf.c (sys_rf_transmit) y prueba cada 5 s en
+            flight_software.c. RF: can_node + radio_transmit().
+[ ] PROBAR  CMD_RF_TRANSMIT: en la consola de la RF (LPUART1) debe salir "TX CAN: n bytes,
+            TX_DONE"; en la del core, "radio: N paquetes enviados".
+[x] IMPL    Firmware de receptor para una segunda placa RF: poc/radio_receiver/main.c
+            (RX continuo, imprime paquete, RSSI, SNR, texto y hex por LPUART1).
+[ ] REVISAR HARDWARE: en la 2a placa RF (la del receptor) el SX1262 no contesta por SPI:
+            todas las lecturas vuelven a 0xFF (chip_mode 0x07, IRQ 0xFFFF, GetDeviceErrors
+            0xFFFF). Comprobar alimentacion (VBAT, VBAT_IO), VREG pin 7 (~1,55 V con el
+            chip despierto), NRESET (PA0) en alto, soldadura de NSS/SCK/MISO/MOSI y el
+            cristal de 32 MHz. El firmware receptor ya avisa al arrancar si no responde.
+[ ] PROBAR  Enlace completo, cuando se arregle esa placa: una RF transmitiendo (baliza +
+            lo que manda el core) y otra con el firmware receptor.
+[x] IMPL    Telemetria por radio: el core coge posicion y actitud del GNC y se las manda
+            a la RF por CAN1 (CMD_RF_TRANSMIT) a 1 Hz; la RF las pone en el aire y el
+            modulo de tierra las imprime por serie. App/rf_telemetry.c, en texto para
+            leerlas sin decodificar: "N123 E45 D-6 R0 P84 Y12" ('!' delante si el EKF
+            todavia no da la navegacion por buena). Probado 2026-09-22: llega con
+            RSSI -22 dBm y SNR +13 dB. La baliza 'hola' de la RF queda desactivada
+            (#if 0 en app/main.c) para dejarle el aire a la telemetria.
+[ ] DECIDIR ===== PROTOCOLO DE DATOS POR RADIO (lo que queda de la RF) =====
+            Hasta ahora la radio ha sido tuberia: se mandaban bytes sueltos para
+            probar el enlace. Falta definir QUE viaja. Anotado el 2026-09-27 tras
+            la prueba de alcance, que salio bien.
+
+            BAJADA (cohete -> tierra). Hoy va en TEXTO, "N123 E45 D-6 R0 P84 Y12",
+            comodo de leer pero caro: 20 bytes para 6 numeros. En binario caben
+            todos los datos utiles en los 32 que permite el ICD. Propuesta:
+              1 B   contador de paquete  (para medir perdidas en tierra)
+              1 B   rocket_state + flight_phase empaquetados
+              1 B   error_code
+              1 B   flags: nav_valid, fix de GPS, satelites, placas vivas
+              6 B   posicion NED      3 x int16, 1 m
+              6 B   velocidad NED     3 x int16, 0,1 m/s
+              8 B   actitud           CUATERNION, 4 x int16 normalizado
+              2 B   altura barometrica int16
+              2 B   apogeo previsto    int16
+              1 B   mando de aerofreno 0..255
+              = 29 B, caben en 32.
+
+            OJO CON LA ACTITUD: NO mandar angulos de Euler. A 90 grados de cabeceo
+            hay bloqueo de cardan y alabeo y guiñada dejan de ser independientes
+            (lo vimos: los dos a 29 grados a la vez), y 90 grados es justo la
+            actitud del cohete en la rampa durante toda la cuenta atras. El
+            cuaternion no tiene ese problema y ocupa solo 2 bytes mas.
+
+            SUBIDA (tierra -> cohete). Los comandos ya los entiende el GNC y
+            gnc_command() ya esta implementado; lo que falta es el camino fisico.
+              1   a MANTENIMIENTO        2   salir de MANTENIMIENTO
+              3   ARMAR                  4,5 fases de descenso
+              255 forzar ERROR
+              + SET_AIRBRAKE con parametro (cmd_param ya existe en el bus)
+            Falta el camino aire -> RF -> CAN1 -> core: hoy la RF de vuelo SOLO
+            transmite. Hace falta un mensaje de ICD nuevo (RF_RECEIVED) y que
+            sensor/flight_software lo lleve a gnc_command().
+
+            SEGURIDAD: ARM y pirotecnia por un enlace de radio sin autenticar es
+            delicado. Como minimo, numero de secuencia y comprobacion propia
+            ademas del CRC de LoRa, para que el ruido no pueda disparar nada. El
+            CRC de LoRa protege contra errores, no contra tramas plausibles.
+
+            CADENCIA: a SF7/BW250 un paquete de 32 B ocupa ~35 ms. A 1 Hz es un
+            3,5 %, muy por debajo del 10 % de la banda, asi que hay sitio para
+            subir a 2 o 3 Hz en ascenso y bajar bajo paracaidas.
+
+            Y RECORDAR: la subida es el sentido DEBIL del enlace (lo medimos, unos
+            20 dB por debajo de la bajada). Los comandos tienen que ir repetidos o
+            con confirmacion; no se puede asumir que llegan a la primera.
+[x] IMPL    Paquete de vuelo binario de 24 bytes (App/flight_packet.c) y envio por
+            CMD_RF_TRANSMIT. Sustituye a la telemetria de texto. La consola USB
+            decodifica lo que ha salido al aire y lo vuelca en hexadecimal, para
+            cotejarlo byte a byte con lo que reciba tierra.
+            Se anadio el cuaternion a gnc_data_t: el GNC lo calculaba pero solo
+            exponia los angulos de Euler, que no valen para la radio por el bloqueo
+            de cardan a 90 grados de cabeceo (la actitud en rampa).
+[x] PROBAR  Paquete verificado en placa (2026-09-28), con las tres placas despiertas
+            y la RF emitiendo. Cadencia exacta: +15 paquetes por segundo medidos en
+            lecturas consecutivas, y 0 fallos de envio una vez despierta la RF.
+            Codificacion contrastada campo a campo contra la consola: contador,
+            nav_valid, altura (-50 x 0,25 = -12,50 m), velocidad vertical, bateria
+            (213 x 0,08 = 17,04 V) y temperatura. Dos comprobaciones independientes
+            que no salen de la consola:
+              - el cuaternion cuantizado a 8 bits da norma 0,999, asi que la escala
+                del +/-127 es correcta,
+              - la aceleracion sale 1,0 g en el eje X del CUERPO con la placa
+                tumbada, que es lo que debe leerse tras el giro de montaje: la
+                cadena de ejes esta bien de punta a punta.
+[ ] REVISAR MODOS DE PRUEBA QUE BLOQUEAN EL ARRANQUE. Comprobar los dos antes de
+            cualquier prueba, y OBLIGATORIAMENTE antes de volar:
+              GNC_PLAYBACK_ENABLE (App/gnc_playback.h)  ahora 0
+              PIL_TEST_ENABLE     (App/pil_test.h)      ahora 0
+            Y los de prueba que no bloquean pero no son para volar, todos a 0:
+              EMERGENCIA_PRUEBA (emergencia.h), CAN_DRIVER_PRUEBA_BUS_OFF
+              (Drivers/Can_driver/can_driver.h), SD_BENCH_ENABLE,
+              ASPID_DATA_PRUEBA, CAMARAS_PRUEBA_UART
+            El 2026-09-28 la reproduccion se quedo activada y, con VUELO.BIN en la
+            tarjeta, cada arranque replicaba 210 s de vuelo ANTES de llegar al
+            bucle principal: ni telemetria ni nada hasta pasados 3,5 minutos.
+            Costo un rato entenderlo porque los contadores salian todos a cero.
+[-] IMPL    (EN PARTE 2026-10-07: 3 Hz en tierra y 15 Hz desde el lanzamiento, arriba del todo; falta bajar tras el aterrizaje) MAQUINA DE CADENCIAS, pendiente. Ahora esta FIJO A 15 Hz para pruebas,
+            que es un 46 % de ciclo de trabajo instantaneo: vale para ratos cortos
+            porque el limite se mide por hora (360 s de emision), pero sostenido
+            agota el presupuesto en 13 minutos. Lo acordado para volar:
+              en tierra          1 Hz
+              tras el despegue  15 Hz durante 5 minutos
+              despues            1 Hz   (para recuperacion, NO silencio: en el
+                                        vuelo de referencia el main se abre a los
+                                        152 s y a los 210 aun no ha tocado suelo)
+            Con ese reparto: 15 Hz x 300 s = 140 s de los 360, y a 1 Hz en rampa
+            quedan casi 2 horas de cuenta atras dentro del presupuesto.
+[ ] DECIDIR AJUSTAR TAMBIEN LA CADENCIA EN TIERRA (pedido el 2026-09-28). La
+            estacion de tierra tiene su propio presupuesto de ciclo de trabajo,
+            independiente del cohete, y hoy el ping va a 1 Hz fijo. Cuando exista
+            el enlace de subida habra que decidir su ritmo: los comandos son
+            esporadicos, pero al ser el sentido DEBIL del enlace (~20 dB por
+            debajo) conviene repetirlos, y eso consume.
+[x] RESUELTO LAS TENSIONES DE LA POWER NO TENIAN SENTIDO (2026-10-01): EL PIN
+            VREF+ DEL MICRO DE LA POWER ESTA FLOTANDO. Fallo de HARDWARE.
+            Sintoma: 3V3 3630, 5V 5500 y 11V 17050 mV, CLAVADOS informe tras
+            informe, y "se arreglaba tocando la placa con el dedo". Los tres son
+            exactamente 3300 mV (ADC = 4095, saturado) por el divisor del codigo.
+            Las corrientes tambien estaban en fondo de escala.
+            Como se encontro (diagnostico App/adc_diag.c, leido por SWD sin
+            parar el micro): VREFINT, la referencia INTERNA de 1,21 V del chip,
+            tambien leia 4095. Para que 1,21 V sature, la referencia del ADC
+            tiene que estar por debajo de 1,21 V: el ADC no tenia referencia.
+            Prueba definitiva: encendiendo a mano el VREFBUF interno del micro
+            (que saca la referencia por ese mismo pin), VREFINT pasa a leer
+            estable y los canales dan medidas reales.
+            Los 17,05 V que "no cuadraban con una 3S" eran esto: saturacion.
+
+[x] RESUELTO HARDWARE DE LA POWER ARREGLADO (2026-10-01): VREF+ unido a
+            VDDA. El apaño (VREFBUF interno a 2,9 V y el 3V3 medido por VBAT)
+            se quito y analog.c quedo limpio:
+              - el VREFBUF se deja APAGADO y en alta impedancia de forma
+                explicita al iniciar (con VREF+ unido a VDDA, si se encendiera
+                se pelearian por el pin)
+              - cada lectura se convierte contra VREFINT medida en ese momento,
+                no contra 3300 mV supuestos: corrige la tolerancia de VDDA
+                (medido 3309-3311 mV)
+              - si la referencia vuelve a fallar (VREFINT saturada o VREF+ fuera
+                de 3,1..3,5 V), las medidas salen como NO VALIDAS (---- en el
+                core) y se cuentan en Analog_BadReferenceCount, en vez de salir
+                un numero creible como los 17 V de antes
+              - un canal saturado tambien sale como no valido
+            Verificado en la consola del core: 3V3 3318, 5V 4998, 11V 13702 mV.
+            El diagnostico App/adc_diag.c se queda (cuesta ~1 ms cada 500 ms) y
+            se lee por SWD sin parar el micro; ver adc_diag.h.
+
+[ ] REVISAR EL DIVISOR DEL 11V DE LA POWER SIGUE SIN COMPROBAR. El 3V3 esta
+            comprobado (3319 por su divisor, 3311 por VBAT, un 0,25 %) y el 5V
+            es creible (4992-5000), pero el 11V da 13,66 V con un divisor
+            supuesto (100k / 24k) y el pin a 2,64 V. Medir el rail con un
+            polimetro: si no sale ~13,7 V, el divisor real es V_polimetro /
+            2,64 y se cambia en power_monitor.c. Y aclarar que es ese rail:
+            13,7 V no es una 3S cargada (12,6 V).
+            Ojo al rango con la referencia a 3,31 V: el 5V se puede medir hasta
+            5,51 V y el 3V3 hasta 3,64 V; por encima salen como no validos.
+
+[ ] REVISAR LAS CORRIENTES DE LA POWER (aparcado a proposito). Ahora que el
+            ADC funciona dan 3V3 49 mA, 5V 1835 mA y 11V 6703 mA, y los 6,7 A
+            del 11V no son creibles en el banco. Los shunts y los factores de
+            calibracion de power_monitor.c son heredados y estan marcados como
+            sin comprobar.
+
+[x] IMPL    Recepcion en la placa de vuelo (tierra -> cohete) y su mensaje CAN hacia el
+            HECHO 2026-09-29: RF_RECEIVED 0x241 y uplink.c.
+            core: la RF de vuelo solo transmite.
+[ ] IMPL    Mas mensajes CAN de la RF: estado de la radio (paquetes enviados, fallos, RSSI)
+            hacia el core.
+
+[ ] IMPL    Quitar el envio de prueba de radio de flight_software.c (RF_TX_TEST_PERIOD_MS)
+            cuando haya telemetria real.
+
+
+---------------------------------------------------------------------------
+GENERAL
+---------------------------------------------------------------------------
+[ ] IMPL    Nada esta commiteado en core, power, avionica ni rf: revisar git status y
+            commitear por partes.
