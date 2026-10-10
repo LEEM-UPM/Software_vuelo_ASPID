@@ -12,6 +12,7 @@ Cada ejecución crea su propia carpeta en el escritorio:
       estado/estado.csv            paquetes de estado (salud del cohete)
       acuses/acuses.csv            respuestas a comandos (ping, ángulo...)
       camaras/camaras.csv          paquetes de cámaras (graban, tarjeta...)
+      cats/cats.csv                lo que llega de la estación de CATS
       comandos/enviados.csv        lo que se ha mandado al cohete
       simulaciones/sim_NN_HH-MM-SS/vuelo.csv, estado.csv
 
@@ -172,6 +173,7 @@ class Grabador(object):
         self._acuses = _Csv(os.path.join(self.dir, "acuses", "acuses.csv"))
         self._camaras = _Csv(os.path.join(self.dir, "camaras",
                                           "camaras.csv"))
+        self._cats = _Csv(os.path.join(self.dir, "cats", "cats.csv"))
         self._comandos = _Csv(os.path.join(self.dir, "comandos",
                                            "enviados.csv"))
         self._registro = open(os.path.join(self.dir, "registro.txt"), "w",
@@ -214,6 +216,20 @@ class Grabador(object):
         except Exception as e:
             self._fallar(e)
 
+    def cats(self, p):
+        """Un paquete de la estacion de CATS (cats.PaqueteCats)."""
+        try:
+            self._cats.fila(
+                ["hora_pc", "t_sesion_s", "link", "ts_s", "estado",
+                 "estado_nombre", "lat", "lon", "alt_m", "vel_mps",
+                 "bateria_v", "linea"],
+                [_hora_pc(p.t), "%.3f" % (p.t - self.t0), p.link,
+                 "%.1f" % p.ts_s, p.estado, p.estado_nombre, "%.5f" % p.lat,
+                 "%.5f" % p.lon, "%.0f" % p.altura_m,
+                 "%.0f" % p.vel_vertical_mps, "%.1f" % p.bateria_v, p.linea])
+        except Exception as e:
+            self._fallar(e)
+
     def evento(self, hora, texto):
         try:
             self._registro.write("%s  %s\n" % (hora, texto))
@@ -248,8 +264,9 @@ class Grabador(object):
 
     def _todos(self):
         return [c for c in (self._crudo, self._estado, self._acuses,
-                            self._comandos, self._tramo, self._sim_vuelo,
-                            self._sim_estado) if c is not None]
+                            self._camaras, self._cats, self._comandos,
+                            self._tramo, self._sim_vuelo, self._sim_estado)
+                if c is not None]
 
     def _fallar(self, e):
         if self.fallo is None:
@@ -425,6 +442,13 @@ camaras/camaras.csv
     4 GRABANDO, 5 parada, 6 parando), no_graba, reloj_puesto, resolucion
     (lineas, fps, pal), tarjeta (libre_mb, total_mb), queda_s (segundos de
     grabacion que caben), grabando_s y pulsaciones del boton.
+
+cats/cats.csv
+    Lo que saca la estacion de tierra de CATS (el otro ordenador de vuelo,
+    catsystems.io) por USB, un paquete por fila: link, ts_s (tiempo del CATS),
+    estado (0 INVALID 1 CALIBRATING 2 READY 3 THRUSTING 4 COASTING 5 DROGUE
+    6 MAIN 7 TOUCHDOWN), lat, lon, alt_m, vel_mps, bateria_v (la del CATS) y
+    la linea tal cual llego.
 
 acuses/acuses.csv
     Respuestas del cohete a comandos (ping, angulo, rumbo, aerofreno...).

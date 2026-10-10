@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Genera VUELO.BIN para la reproduccion de vuelo (App/gnc_playback.c).
 
-Para el GNC v1.5 (vale igual para la v1.2): un registro por tick de 400 Hz,
+Para el GNC v1.6 (y las anteriores): un registro por tick del GNC (416 Hz
+con la v1.6, 400 hasta la v1.5),
 sacado de pil/nav_inputs.csv de la entrega. La v1.5 trae el vuelo entero:
 181,5 s, despegue a ~1,1 s, apogeo a ~22 s, drogue a ~26 s, main a 450 m
 (~120 s) y suelo.
@@ -52,7 +53,9 @@ NAME = "VUELO v1.5"
 # cmd:  id param valid
 RECORD_FMT = "<3f3fdB3fdBffdBiiiiiiBBBBfB"
 RECORD_BYTES = struct.calcsize(RECORD_FMT)
-TICK_S = 0.0025
+# Un tick del GNC: 416 Hz con la v1.6 (hasta la v1.5, 400 Hz)
+HZ = 416.0
+TICK_S = 1.0 / HZ
 
 
 def main():
@@ -125,8 +128,8 @@ def main():
         fo.write(body)
 
     duration = rows * TICK_S
-    print("VUELO.BIN  %d B/registro  %d ticks de 400 Hz  %.1f s  %.2f MB"
-          % (RECORD_BYTES, rows, duration,
+    print("VUELO.BIN  %d B/registro  %d ticks de %.0f Hz  %.1f s  %.2f MB"
+          % (RECORD_BYTES, rows, HZ, duration,
              (HEADER_BYTES + len(body)) / 1048576.0))
     for k in ("imu1", "imu2", "baro", "gps"):
         print("  %-5s %6d muestras = %6.1f Hz" % (k, cuenta[k],

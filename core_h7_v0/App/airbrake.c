@@ -135,7 +135,7 @@ static bool _secuencia(uint32_t t_ms, float *extension) {
 void airbrake_update(void) {
   const gnc_data_t *g = gnc_get_data();
 
-  /* Paso nuevo del GUIADO (50 Hz: es quien da el mando, y el servo no
+  /* Paso nuevo del GUIADO (52 Hz: es quien da el mando, y el servo no
    * aprovecha más de 50 Hz), o GNC reiniciado (que puede dejar el contador
    * donde estaba o en un valor ya visto) */
   const bool reiniciado = (gnc_init_count() != s_inits_vistos);
@@ -154,7 +154,8 @@ void airbrake_update(void) {
     s_prueba = PRUEBA_NINGUNA;
   }
 
-  float extension = en_vuelo ? g->actuator_cmd : 0.0f;
+  /* El GNC, en cualquier estado (airbrake.h), de su escala a la nuestra */
+  float extension = g->actuator_cmd / GNC_ACTUADOR_MAX;
 
   if (s_prueba == PRUEBA_SECUENCIA) {
     if (!_secuencia(HAL_GetTick() - s_prueba_t0_ms, &extension)) {

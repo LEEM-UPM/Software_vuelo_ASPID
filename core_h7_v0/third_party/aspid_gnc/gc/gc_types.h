@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'gc'.
  *
- * Model version                  : 3.17
+ * Model version                  : 3.46
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Mon Oct  5 22:54:41 2026
+ * C/C++ source code generated on : Sat Oct 10 21:00:39 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -32,6 +32,18 @@ typedef struct {
 
 #endif
 
+#ifndef DEFINED_TYPEDEF_FOR_restore_bus_
+#define DEFINED_TYPEDEF_FOR_restore_bus_
+
+/* Auto */
+typedef struct {
+  uint8_T valid;
+  int32_T rocket_state;
+  int32_T flight_phase;
+} restore_bus;
+
+#endif
+
 #ifndef DEFINED_TYPEDEF_FOR_gc_bus_in_
 #define DEFINED_TYPEDEF_FOR_gc_bus_in_
 
@@ -46,7 +58,11 @@ typedef struct {
   uint8_T nav_valid;
   real_T timestamp_s;
   int32_T rocket_state;
+  uint8_T error_code;
   tel_bus telemetry_cmd;
+  restore_bus restore;
+  uint8_T nav_init_flags;
+  uint8_T gnss_only;
 } gc_bus_in;
 
 #endif
@@ -65,6 +81,7 @@ typedef struct {
   real32_T a_closed;
   real32_T authority;
   real32_T a_meas;
+  real32_T u_fallback;
 } gc_ctrl_bus;
 
 #endif
@@ -78,6 +95,9 @@ typedef struct {
   real32_T min_ctrl_alt_agl_m;
   real32_T main_deploy_alt_agl_m;
   real32_T drogue_delay_s;
+  real32_T drogue_inhibit_s;
+  real32_T drogue_timeout_s;
+  real32_T deadband_m;
 } gc_tun_bus;
 
 #endif
@@ -106,6 +126,9 @@ typedef struct {
   real_T t_test_drogue_s;
   real_T t_test_main_s;
   uint8_T init_done;
+  uint8_T restore_done;
+  real_T t_airborne_s;
+  real_T t_barrido_s;
 } gc_state;
 
 #endif
@@ -128,16 +151,19 @@ typedef struct {
   uint8_T pred_valid;
   uint8_T pyro_armed;
   real_T timestamp_s;
+  uint32_T status_word;
 } gc_bus_out;
 
 #endif
 
-#ifndef DEFINED_TYPEDEF_FOR_struct_6gTzvACx4jca4BCrrOkso_
-#define DEFINED_TYPEDEF_FOR_struct_6gTzvACx4jca4BCrrOkso_
+#ifndef DEFINED_TYPEDEF_FOR_struct_rAm9KbC4xVIPKCNwU7tAqD_
+#define DEFINED_TYPEDEF_FOR_struct_rAm9KbC4xVIPKCNwU7tAqD_
 
 typedef struct {
   real_T kp_outer;
   real_T tgo_min_s;
+  real_T restore_window_s;
+  real_T barrido_abierto_s;
   real_T dt;
   real_T deadband_m;
   real_T kp_inner;
@@ -152,6 +178,7 @@ typedef struct {
   real_T min_ctrl_alt_agl_m;
   real_T mach_ctrl_max;
   real_T v_ctrl_min_mps;
+  real_T gnss_age_max_s;
   real_T apogee_target_agl_m;
   real_T min_boost_s;
   real_T burnout_decel_thr;
@@ -161,6 +188,8 @@ typedef struct {
   uint16_T apogee_debounce_n;
   real_T apogee_alt_drop_m;
   real_T drogue_delay_s;
+  real_T drogue_inhibit_s;
+  real_T drogue_timeout_s;
   real_T main_deploy_alt_agl_m;
   real_T pyro_pulse_s;
   real_T main_backup_delay_s;
@@ -169,7 +198,7 @@ typedef struct {
   real_T land_alt_thr_m;
   real_T land_debounce_s;
   uint16_T land_debounce_n;
-} struct_6gTzvACx4jca4BCrrOkso;
+} struct_rAm9KbC4xVIPKCNwU7tAqD;
 
 #endif
 

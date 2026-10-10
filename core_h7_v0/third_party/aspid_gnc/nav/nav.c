@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'nav'.
  *
- * Model version                  : 1.25
+ * Model version                  : 1.51
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Tue Oct  6 00:35:37 2026
+ * C/C++ source code generated on : Sat Oct 10 20:59:19 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -46,22 +46,29 @@ ExtY_nav_T nav_Y;
 /* Forward declaration for local functions */
 static real_T nav_norm(const real_T x[3]);
 static real_T nav_maximum(const real_T x[3]);
-static real_T nav_norm_d4(const real_T x[4]);
+static real_T nav_norm_cq(const real_T x[4]);
+static void nav_quat_to_dcm_bn(const real_T q[4], real_T C[9]);
+static void nav_quat_de_rampa(real32_T b_nav_tun_rail_elev_deg, real32_T
+  b_nav_tun_rail_azim_deg, real_T q[4]);
+static void nav_cross(const real_T a[3], const real_T b[3], real_T c[3]);
+static void nav_lla_to_ned(const real_T lla[3], const real_T lla0[3], real_T
+  ned[3]);
 static void nav_eye(real_T b_I[9]);
 static void nav_mldivide(const real_T A[9], const real_T B[3], real_T Y[3]);
 static void nav_diag(const real_T v[3], real_T d[9]);
-static void nav_mrdiv_o(real_T A[90], const real_T B[36]);
+static void nav_mrdiv_l(real_T A[90], const real_T B[36]);
+static void nav_estados_corregibles(boolean_T es_baro, boolean_T es_reenganche,
+  real_T m[15]);
+static void nav_diag_b(const real_T v[15], real_T d[225]);
 static void nav_eye_d(real_T b_I[225]);
 static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4],
   const real32_T st_ref_pos_ned[3], const real32_T st_ref_vel_ned[3], const
-  real32_T st_ref_accel_body[3], const real32_T st_ref_accel_bias[3], const
-  real32_T st_ref_gyro_bias[3], const real_T dx[15], const real_T P[225], real_T
-  b_nav_data_g0, real_T b_nav_data_accel_bias_max, real_T
-  b_nav_data_gyro_bias_max, real_T b_nav_data_bias_freeze_accel_g, boolean_T
-  permite_sesgo_acel);
+  real32_T st_ref_accel_bias[3], const real32_T st_ref_gyro_bias[3], const
+  real_T dx[15], const real_T P[225], real_T b_nav_data_accel_bias_max, real_T
+  b_nav_data_gyro_bias_max);
 static boolean_T nav_all(const boolean_T x[4]);
 static void nav_isfinite(const real_T x[3], boolean_T b[3]);
-static boolean_T nav_all_h(const boolean_T x[3]);
+static boolean_T nav_all_g(const boolean_T x[3]);
 
 /* Function for MATLAB Function: '<Root>/EKF_Prediction' */
 static real_T nav_norm(const real_T x[3])
@@ -163,7 +170,7 @@ static real_T nav_maximum(const real_T x[3])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static real_T nav_norm_d4(const real_T x[4])
+static real_T nav_norm_cq(const real_T x[4])
 {
   real_T absxk;
   real_T scale;
@@ -230,6 +237,86 @@ static real_T nav_norm_d4(const real_T x[4])
   }
 
   return y;
+}
+
+/* Function for MATLAB Function: '<Root>/INS_Mechanization' */
+static void nav_quat_to_dcm_bn(const real_T q[4], real_T C[9])
+{
+  real_T C_tmp;
+  real_T C_tmp_0;
+  real_T C_tmp_1;
+  real_T C_tmp_2;
+  real_T C_tmp_3;
+  real_T C_tmp_4;
+  C_tmp_1 = q[3] * q[3];
+  C_tmp_4 = q[2] * q[2];
+  C[0] = 1.0 - (C_tmp_4 + C_tmp_1) * 2.0;
+  C_tmp = q[1] * q[2];
+  C_tmp_0 = q[0] * q[3];
+  C[3] = (C_tmp - C_tmp_0) * 2.0;
+  C_tmp_2 = q[1] * q[3];
+  C_tmp_3 = q[0] * q[2];
+  C[6] = (C_tmp_2 + C_tmp_3) * 2.0;
+  C[1] = (C_tmp + C_tmp_0) * 2.0;
+  C_tmp = q[1] * q[1];
+  C[4] = 1.0 - (C_tmp + C_tmp_1) * 2.0;
+  C_tmp_1 = q[2] * q[3];
+  C_tmp_0 = q[0] * q[1];
+  C[7] = (C_tmp_1 - C_tmp_0) * 2.0;
+  C[2] = (C_tmp_2 - C_tmp_3) * 2.0;
+  C[5] = (C_tmp_1 + C_tmp_0) * 2.0;
+  C[8] = 1.0 - (C_tmp + C_tmp_4) * 2.0;
+}
+
+/* Function for MATLAB Function: '<Root>/INS_Mechanization' */
+static void nav_quat_de_rampa(real32_T b_nav_tun_rail_elev_deg, real32_T
+  b_nav_tun_rail_azim_deg, real_T q[4])
+{
+  real_T cp;
+  real_T cy;
+  real_T q_tmp;
+  real_T q_tmp_0;
+  real_T sp;
+  real_T sy;
+  sp = b_nav_tun_rail_elev_deg * 3.1415926535897931 / 180.0 * 0.5;
+  cp = cos(sp);
+  sp = sin(sp);
+  sy = b_nav_tun_rail_azim_deg * 3.1415926535897931 / 180.0 * 0.5;
+  cy = cos(sy);
+  sy = sin(sy);
+  q_tmp_0 = 0.0 * sp;
+  q[0] = q_tmp_0 * sy + cp * cy;
+  q_tmp = 0.0 * cp;
+  q[1] = q_tmp * cy - sp * sy;
+  q[2] = q_tmp * sy + sp * cy;
+  q[3] = cp * sy - q_tmp_0 * cy;
+  cp = nav_norm_cq(q);
+  q[0] /= cp;
+  q[1] /= cp;
+  q[2] /= cp;
+  q[3] /= cp;
+}
+
+/* Function for MATLAB Function: '<Root>/EKF_Update' */
+static void nav_cross(const real_T a[3], const real_T b[3], real_T c[3])
+{
+  c[0] = a[1] * b[2] - b[1] * a[2];
+  c[1] = b[0] * a[2] - a[0] * b[2];
+  c[2] = a[0] * b[1] - b[0] * a[1];
+}
+
+/* Function for MATLAB Function: '<Root>/EKF_Update' */
+static void nav_lla_to_ned(const real_T lla[3], const real_T lla0[3], real_T
+  ned[3])
+{
+  real_T ned_tmp;
+  real_T s;
+  s = sin(lla0[0]);
+  s = 1.0 - 0.00669437999014 * s * s;
+  ned_tmp = sqrt(s);
+  ned[0] = (6.3354393272928288E+6 / (s * ned_tmp) + lla0[2]) * (lla[0] - lla0[0]);
+  ned[1] = (6.378137E+6 / ned_tmp + lla0[2]) * (lla[1] - lla0[1]) * cos(lla0[0]);
+  ned[2] = -(lla[2] - lla0[2]);
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
@@ -303,7 +390,7 @@ static void nav_diag(const real_T v[3], real_T d[9])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static void nav_mrdiv_o(real_T A[90], const real_T B[36])
+static void nav_mrdiv_l(real_T A[90], const real_T B[36])
 {
   real_T b_A[36];
   real_T smax;
@@ -420,6 +507,43 @@ static void nav_mrdiv_o(real_T A[90], const real_T B[36])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
+static void nav_estados_corregibles(boolean_T es_baro, boolean_T es_reenganche,
+  real_T m[15])
+{
+  int32_T i;
+  for (i = 0; i < 15; i++) {
+    m[i] = 1.0;
+  }
+
+  for (i = 0; i < 6; i++) {
+    m[i + 9] = 0.0;
+  }
+
+  if (es_reenganche) {
+    memset(&m[0], 0, 15U * sizeof(real_T));
+    for (i = 0; i < 6; i++) {
+      m[i + 3] = 1.0;
+    }
+  }
+
+  if (es_baro) {
+    memset(&m[0], 0, 15U * sizeof(real_T));
+    m[5] = 1.0;
+    m[8] = 1.0;
+  }
+}
+
+/* Function for MATLAB Function: '<Root>/EKF_Update' */
+static void nav_diag_b(const real_T v[15], real_T d[225])
+{
+  int32_T j;
+  memset(&d[0], 0, 225U * sizeof(real_T));
+  for (j = 0; j < 15; j++) {
+    d[j + 15 * j] = v[j];
+  }
+}
+
+/* Function for MATLAB Function: '<Root>/EKF_Update' */
 static void nav_eye_d(real_T b_I[225])
 {
   int32_T k;
@@ -432,47 +556,22 @@ static void nav_eye_d(real_T b_I[225])
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
 static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4],
   const real32_T st_ref_pos_ned[3], const real32_T st_ref_vel_ned[3], const
-  real32_T st_ref_accel_body[3], const real32_T st_ref_accel_bias[3], const
-  real32_T st_ref_gyro_bias[3], const real_T dx[15], const real_T P[225], real_T
-  b_nav_data_g0, real_T b_nav_data_accel_bias_max, real_T
-  b_nav_data_gyro_bias_max, real_T b_nav_data_bias_freeze_accel_g, boolean_T
-  permite_sesgo_acel)
+  real32_T st_ref_accel_bias[3], const real32_T st_ref_gyro_bias[3], const
+  real_T dx[15], const real_T P[225], real_T b_nav_data_accel_bias_max, real_T
+  b_nav_data_gyro_bias_max)
 {
   real_T dq[4];
   real_T q_new[4];
-  real_T st_ref_accel_body_0[3];
   real_T a_idx_0;
   real_T a_idx_1;
   real_T a_idx_2;
   real_T a_idx_3;
-  real_T dba_idx_0;
-  real_T dba_idx_1;
-  real_T dba_idx_2;
   int32_T i;
-  dba_idx_0 = dx[9];
-  st_ref_accel_body_0[0] = st_ref_accel_body[0];
-  dba_idx_1 = dx[10];
-  st_ref_accel_body_0[1] = st_ref_accel_body[1];
-  dba_idx_2 = dx[11];
-  st_ref_accel_body_0[2] = st_ref_accel_body[2];
-  if (nav_norm(st_ref_accel_body_0) > b_nav_data_bias_freeze_accel_g *
-      b_nav_data_g0) {
-    dba_idx_0 = 0.0;
-    dba_idx_1 = 0.0;
-    dba_idx_2 = 0.0;
-  }
-
-  if (!permite_sesgo_acel) {
-    dba_idx_0 = 0.0;
-    dba_idx_1 = 0.0;
-    dba_idx_2 = 0.0;
-  }
-
   dq[0] = 1.0;
   dq[1] = 0.5 * dx[0];
   dq[2] = 0.5 * dx[1];
   dq[3] = 0.5 * dx[2];
-  a_idx_3 = nav_norm_d4(dq);
+  a_idx_3 = nav_norm_cq(dq);
   a_idx_0 = 1.0 / a_idx_3;
   a_idx_1 = dq[1] / a_idx_3;
   a_idx_2 = dq[2] / a_idx_3;
@@ -485,7 +584,7 @@ static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4]
               st_ref_quat_nb[0] * a_idx_2) + st_ref_quat_nb[1] * a_idx_3;
   q_new[3] = ((a_idx_0 * st_ref_quat_nb[3] + a_idx_1 * st_ref_quat_nb[2]) -
               st_ref_quat_nb[1] * a_idx_2) + st_ref_quat_nb[0] * a_idx_3;
-  a_idx_3 = nav_norm_d4(q_new);
+  a_idx_3 = nav_norm_cq(q_new);
   q_new[0] /= a_idx_3;
   q_new[1] /= a_idx_3;
   q_new[2] /= a_idx_3;
@@ -496,19 +595,19 @@ static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4]
   st->quat_nb[3] = (real32_T)q_new[3];
   st->vel_ned[0] = (real32_T)(st_ref_vel_ned[0] + dx[3]);
   st->pos_ned[0] = (real32_T)(st_ref_pos_ned[0] + dx[6]);
-  st->accel_bias[0] = (real32_T)fmin(fmax(st_ref_accel_bias[0] + dba_idx_0,
+  st->accel_bias[0] = (real32_T)fmin(fmax(st_ref_accel_bias[0] + dx[9],
     -b_nav_data_accel_bias_max), b_nav_data_accel_bias_max);
   st->gyro_bias[0] = (real32_T)fmin(fmax(st_ref_gyro_bias[0] + dx[12],
     -b_nav_data_gyro_bias_max), b_nav_data_gyro_bias_max);
   st->vel_ned[1] = (real32_T)(st_ref_vel_ned[1] + dx[4]);
   st->pos_ned[1] = (real32_T)(st_ref_pos_ned[1] + dx[7]);
-  st->accel_bias[1] = (real32_T)fmin(fmax(st_ref_accel_bias[1] + dba_idx_1,
+  st->accel_bias[1] = (real32_T)fmin(fmax(st_ref_accel_bias[1] + dx[10],
     -b_nav_data_accel_bias_max), b_nav_data_accel_bias_max);
   st->gyro_bias[1] = (real32_T)fmin(fmax(st_ref_gyro_bias[1] + dx[13],
     -b_nav_data_gyro_bias_max), b_nav_data_gyro_bias_max);
   st->vel_ned[2] = (real32_T)(st_ref_vel_ned[2] + dx[5]);
   st->pos_ned[2] = (real32_T)(st_ref_pos_ned[2] + dx[8]);
-  st->accel_bias[2] = (real32_T)fmin(fmax(st_ref_accel_bias[2] + dba_idx_2,
+  st->accel_bias[2] = (real32_T)fmin(fmax(st_ref_accel_bias[2] + dx[11],
     -b_nav_data_accel_bias_max), b_nav_data_accel_bias_max);
   st->gyro_bias[2] = (real32_T)fmin(fmax(st_ref_gyro_bias[2] + dx[14],
     -b_nav_data_gyro_bias_max), b_nav_data_gyro_bias_max);
@@ -593,7 +692,7 @@ static void nav_isfinite(const real_T x[3], boolean_T b[3])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static boolean_T nav_all_h(const boolean_T x[3])
+static boolean_T nav_all_g(const boolean_T x[3])
 {
   int32_T k;
   boolean_T exitg1;
@@ -660,60 +759,70 @@ void nav_step(void)
   real_T Phi[225];
   real_T Phi_0[225];
   real_T Phi_1[225];
-  real_T Fdt_1[90];
   real_T H[90];
   real_T H_0[90];
   real_T K[90];
+  real_T tmp[90];
   real_T R[36];
   real_T S[36];
-  real_T tmp_0[36];
+  real_T tmp_1[36];
+  real_T Fdt_1[15];
   real_T K_b[15];
-  real_T K_b_0[15];
   real_T Cbn[9];
   real_T H_tmp[9];
   real_T z[6];
   real_T q[4];
   real_T q_mid[4];
-  real_T q_new[4];
+  real_T q_mid_0[4];
   real_T a_lg[3];
   real_T f_b[3];
   real_T omega_b[3];
   real_T theta[3];
   real_T ang;
-  real_T cp;
-  real_T cy;
+  real_T b_b;
+  real_T d_b_idx_1;
+  real_T d_b_idx_3;
   real_T dt;
   real_T dt_meas;
-  real_T n_meas;
-  real_T sp;
-  real_T sy;
-  int32_T Cbn_0;
+  real_T n_exp;
+  real_T w;
   int32_T Fdt_tmp;
-  int32_T Fdt_tmp_0;
-  int32_T b_k;
+  int32_T gnss_cnt;
   int32_T i;
-  uint32_T tmp_1;
+  uint32_T tmp_2;
   int8_T S_b_tmp[15];
   int8_T S_b_tmp_0[15];
-  boolean_T tmp[4];
+  uint8_T flags;
+  boolean_T tmp_0[4];
   boolean_T hg_ok;
   boolean_T lg_ok;
   boolean_T use_pos;
-  static const int8_T b_a[15] = { 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0 };
+  static const int8_T a[15] = { 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0 };
+
+  static const int8_T b_a[225] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0 };
 
   static const int8_T c_a[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 
-  static const real_T d[9] = { 1.0E+12, 0.0, 0.0, 0.0, 1.0E+12, 0.0, 0.0, 0.0,
+  static const real_T e[9] = { 1.0E+12, 0.0, 0.0, 0.0, 1.0E+12, 0.0, 0.0, 0.0,
     1.0E+12 };
 
-  real_T ang_tmp;
-  real_T dt_meas_tmp;
-  real32_T tmp_3[4];
-  real32_T tmp_4[3];
+  int32_T Cbn_tmp;
+  int32_T Cbn_tmp_0;
+  real32_T tmp_4[4];
   real32_T tmp_5[3];
   real32_T tmp_6[3];
   real32_T tmp_7[3];
-  boolean_T tmp_2[3];
+  real32_T tmp_8[3];
+  boolean_T tmp_3[3];
   boolean_T guard1;
 
   /* MATLAB Function: '<Root>/INS_Mechanization' incorporates:
@@ -722,11 +831,11 @@ void nav_step(void)
    *  Memory: '<Root>/NavState_Memory'
    */
   state_in = nav_DW.NavState_Memory_PreviousInput;
-  dt = 0.0025;
+  dt = 0.002403846153846154;
   if (nav_U.nav_in.imu_lowg.data_valid == 1) {
     dt_meas = nav_U.nav_in.imu_lowg.timestamp_s -
       nav_DW.NavState_Memory_PreviousInput.timestamp_s;
-    if ((dt_meas > 0.00125) && (dt_meas < 0.005)) {
+    if ((dt_meas > 0.001201923076923077) && (dt_meas < 0.004807692307692308)) {
       dt = dt_meas;
     }
   }
@@ -736,36 +845,36 @@ void nav_step(void)
   a_lg[2] = nav_U.nav_in.imu_lowg.accel_mps2[2];
   lg_ok = (nav_U.nav_in.imu_lowg.data_valid == 1);
   hg_ok = (nav_U.nav_in.imu_highg.data_valid == 1);
-  dt_meas = fmin(fmax((nav_norm(a_lg) / 9.80665 - 12.0) / 4.0, 0.0), 1.0);
+  w = fmin(fmax((nav_norm(a_lg) / 9.80665 - 12.0) / 4.0, 0.0), 1.0);
   theta[0] = fabs(nav_U.nav_in.imu_lowg.accel_mps2[0]);
   theta[1] = fabs(nav_U.nav_in.imu_lowg.accel_mps2[1]);
   theta[2] = fabs(nav_U.nav_in.imu_lowg.accel_mps2[2]);
   if (nav_maximum(theta) >= 153.768272) {
-    dt_meas = 1.0;
+    w = 1.0;
   }
 
   use_pos = !lg_ok;
   if (use_pos && hg_ok) {
-    dt_meas = 1.0;
+    w = 1.0;
   } else if (lg_ok && (!hg_ok)) {
-    dt_meas = 0.0;
+    w = 0.0;
   }
 
   if (lg_ok || hg_ok) {
-    a_lg[0] = (1.0 - dt_meas) * nav_U.nav_in.imu_lowg.accel_mps2[0] + dt_meas *
+    a_lg[0] = (1.0 - w) * nav_U.nav_in.imu_lowg.accel_mps2[0] + w *
       nav_U.nav_in.imu_highg.accel_mps2[0];
-    a_lg[1] = (1.0 - dt_meas) * nav_U.nav_in.imu_lowg.accel_mps2[1] + dt_meas *
+    a_lg[1] = (1.0 - w) * nav_U.nav_in.imu_lowg.accel_mps2[1] + w *
       nav_U.nav_in.imu_highg.accel_mps2[1];
-    a_lg[2] = (1.0 - dt_meas) * nav_U.nav_in.imu_lowg.accel_mps2[2] + dt_meas *
+    a_lg[2] = (1.0 - w) * nav_U.nav_in.imu_lowg.accel_mps2[2] + w *
       nav_U.nav_in.imu_highg.accel_mps2[2];
   } else {
     a_lg[0] = nav_DW.NavState_Memory_PreviousInput.accel_body[0];
     a_lg[1] = nav_DW.NavState_Memory_PreviousInput.accel_body[1];
     a_lg[2] = nav_DW.NavState_Memory_PreviousInput.accel_body[2];
-    dt_meas = nav_DW.NavState_Memory_PreviousInput.imu_blend_w;
+    w = nav_DW.NavState_Memory_PreviousInput.imu_blend_w;
   }
 
-  f_b[0] = a_lg[0] - (1.0 - dt_meas) *
+  f_b[0] = a_lg[0] - (1.0 - w) *
     nav_DW.NavState_Memory_PreviousInput.accel_bias[0];
   if (lg_ok) {
     omega_b[0] = (real_T)nav_U.nav_in.imu_lowg.gyro_rps[0] -
@@ -774,7 +883,7 @@ void nav_step(void)
     omega_b[0] = nav_DW.NavState_Memory_PreviousInput.gyro_body[0];
   }
 
-  f_b[1] = a_lg[1] - (1.0 - dt_meas) *
+  f_b[1] = a_lg[1] - (1.0 - w) *
     nav_DW.NavState_Memory_PreviousInput.accel_bias[1];
   if (lg_ok) {
     omega_b[1] = (real_T)nav_U.nav_in.imu_lowg.gyro_rps[1] -
@@ -783,7 +892,7 @@ void nav_step(void)
     omega_b[1] = nav_DW.NavState_Memory_PreviousInput.gyro_body[1];
   }
 
-  f_b[2] = a_lg[2] - (1.0 - dt_meas) *
+  f_b[2] = a_lg[2] - (1.0 - w) *
     nav_DW.NavState_Memory_PreviousInput.accel_bias[2];
   if (lg_ok) {
     omega_b[2] = (real_T)nav_U.nav_in.imu_lowg.gyro_rps[2] -
@@ -795,19 +904,26 @@ void nav_step(void)
   switch (nav_U.nav_in.nav_cmd) {
    case 10U:
     state_in.init_done = 0U;
+    state_in.align_ok = 0U;
     state_in.align_cnt = 0U;
+    state_in.baro_sum = 0.0;
+    state_in.baro_ref_set = 0U;
     state_in.acc_sum[0] = 0.0F;
     state_in.gyr_sum[0] = 0.0F;
+    state_in.gnss_sum[0] = 0.0;
     state_in.acc_sum[1] = 0.0F;
     state_in.gyr_sum[1] = 0.0F;
+    state_in.gnss_sum[1] = 0.0;
     state_in.acc_sum[2] = 0.0F;
     state_in.gyr_sum[2] = 0.0F;
-    state_in.baro_sum = 0.0F;
-    state_in.baro_ref_set = 0U;
+    state_in.gnss_sum[2] = 0.0;
+    state_in.gnss_cnt = 0U;
+    state_in.origin_set = 0U;
     break;
 
    case 11U:
-    memcpy(&state_in.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof(real32_T));
+    memcpy(&state_in.P[0], &nav_ConstP.pooled1.P_align[0], 225U * sizeof
+           (real32_T));
     state_in.reject_cnt = 0U;
     state_in.baro_rej_cnt = 0U;
     break;
@@ -818,7 +934,7 @@ void nav_step(void)
     rtb_state_out = state_in;
     rtb_state_out.timestamp_s = nav_DW.NavState_Memory_PreviousInput.timestamp_s
       + dt;
-    rtb_state_out.imu_blend_w = (real32_T)dt_meas;
+    rtb_state_out.imu_blend_w = (real32_T)w;
     rtb_state_out.accel_body[0] = (real32_T)a_lg[0];
     rtb_state_out.gyro_body[0] = (real32_T)omega_b[0];
     rtb_state_out.accel_ned[0] = 0.0F;
@@ -838,97 +954,88 @@ void nav_step(void)
 
     if (lg_ok || use_pos) {
       rtb_state_out.align_cnt = 0U;
+      rtb_state_out.baro_sum = 0.0;
       rtb_state_out.acc_sum[0] = 0.0F;
       rtb_state_out.gyr_sum[0] = 0.0F;
+      rtb_state_out.gnss_sum[0] = 0.0;
       rtb_state_out.acc_sum[1] = 0.0F;
       rtb_state_out.gyr_sum[1] = 0.0F;
+      rtb_state_out.gnss_sum[1] = 0.0;
       rtb_state_out.acc_sum[2] = 0.0F;
       rtb_state_out.gyr_sum[2] = 0.0F;
-      rtb_state_out.baro_sum = 0.0F;
+      rtb_state_out.gnss_sum[2] = 0.0;
+      rtb_state_out.gnss_cnt = 0U;
 
       /* MATLAB Function: '<Root>/EKF_Prediction' */
       memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof
              (real32_T));
     } else {
+      dt = state_in.baro_sum + nav_U.nav_in.baro.press_pa;
       a_lg[0] += state_in.acc_sum[0];
       omega_b[0] += state_in.gyr_sum[0];
+      theta[0] = state_in.gnss_sum[0];
       a_lg[1] += state_in.acc_sum[1];
       omega_b[1] += state_in.gyr_sum[1];
+      theta[1] = state_in.gnss_sum[1];
       a_lg[2] += state_in.acc_sum[2];
       omega_b[2] += state_in.gyr_sum[2];
-      dt = (real_T)state_in.baro_sum + nav_U.nav_in.baro.press_pa;
-      if (state_in.align_cnt + 1 >= 200) {
-        a_lg[0] /= (real_T)state_in.align_cnt + 1.0;
-        a_lg[1] /= (real_T)state_in.align_cnt + 1.0;
-        a_lg[2] /= (real_T)state_in.align_cnt + 1.0;
-        n_meas = nav_tun.rail_elev_deg * 3.1415926535897931 / 180.0 * 0.5;
-        dt_meas = cos(n_meas);
-        cp = sin(n_meas);
-        n_meas = nav_tun.rail_azim_deg * 3.1415926535897931 / 180.0 * 0.5;
-        sp = cos(n_meas);
-        cy = sin(n_meas);
-        n_meas = 0.0 * cp;
-        q[0] = n_meas * cy + dt_meas * sp;
-        ang = 0.0 * dt_meas;
-        q[1] = ang * sp - cp * cy;
-        q[2] = ang * cy + cp * sp;
-        q[3] = dt_meas * cy - n_meas * sp;
-        n_meas = nav_norm_d4(q);
-        q[0] /= n_meas;
-        q[1] /= n_meas;
-        q[2] /= n_meas;
-        q[3] /= n_meas;
-        n_meas = q[3] * q[3];
-        ang = q[2] * q[2];
-        H_tmp[0] = -(1.0 - (ang + n_meas) * 2.0);
-        cp = q[1] * q[2];
-        sp = q[0] * q[3];
-        H_tmp[1] = -((cp - sp) * 2.0);
-        cy = q[1] * q[3];
-        sy = q[0] * q[2];
-        H_tmp[2] = -((cy + sy) * 2.0);
-        H_tmp[3] = -((cp + sp) * 2.0);
-        cp = q[1] * q[1];
-        H_tmp[4] = -(1.0 - (cp + n_meas) * 2.0);
-        n_meas = q[2] * q[3];
-        sp = q[0] * q[1];
-        H_tmp[5] = -((n_meas - sp) * 2.0);
-        H_tmp[6] = -((cy - sy) * 2.0);
-        H_tmp[7] = -((n_meas + sp) * 2.0);
-        H_tmp[8] = -(1.0 - (cp + ang) * 2.0);
-        theta[0] = 0.0;
-        theta[1] = 0.0;
-        theta[2] = 9.80665;
-        dt_meas = 0.0;
+      theta[2] = state_in.gnss_sum[2];
+      gnss_cnt = state_in.gnss_cnt;
+      if ((nav_U.nav_in.gnss.data_valid == 1) && (nav_U.nav_in.gnss.fix_type >=
+           3) && (nav_U.nav_in.gnss.num_sats >= 5)) {
+        theta[0] = state_in.gnss_sum[0] + nav_U.nav_in.gnss.pos_lla[0];
+        theta[1] = state_in.gnss_sum[1] + nav_U.nav_in.gnss.pos_lla[1];
+        theta[2] = state_in.gnss_sum[2] + nav_U.nav_in.gnss.pos_lla[2];
+        gnss_cnt = state_in.gnss_cnt + 1;
+        rtb_state_out.gnss_age_s = 0.0F;
+      }
+
+      if (state_in.align_cnt + 1 >= 832) {
+        nav_quat_de_rampa(nav_tun.rail_elev_deg, nav_tun.rail_azim_deg, q);
+        nav_quat_to_dcm_bn(q, H_tmp);
+        f_b[0] = 0.0;
+        f_b[1] = 0.0;
+        f_b[2] = 9.80665;
+        w = 0.0;
         ang = 0.0;
-        cp = 0.0;
+        d_b_idx_1 = 0.0;
         for (i = 0; i < 3; i++) {
-          n_meas = theta[i];
-          dt_meas += H_tmp[3 * i] * n_meas;
-          ang += H_tmp[3 * i + 1] * n_meas;
-          cp += H_tmp[3 * i + 2] * n_meas;
+          a_lg[i] /= (real_T)state_in.align_cnt + 1.0;
+          Cbn[3 * i] = -H_tmp[i];
+          Cbn_tmp = 3 * i + 1;
+          Cbn[Cbn_tmp] = -H_tmp[i + 3];
+          Cbn_tmp_0 = 3 * i + 2;
+          Cbn[Cbn_tmp_0] = -H_tmp[i + 6];
+          dt_meas = f_b[i];
+          w += Cbn[3 * i] * dt_meas;
+          ang += Cbn[Cbn_tmp] * dt_meas;
+          d_b_idx_1 += Cbn[Cbn_tmp_0] * dt_meas;
         }
 
-        theta[2] = cp;
-        theta[1] = ang;
-        theta[0] = dt_meas;
-        n_meas = nav_norm(a_lg);
-        sp = nav_norm(theta);
-        cy = 1.0;
-        if ((n_meas > 1.0E-6) && (sp > 1.0E-6)) {
-          cy = ((a_lg[0] * dt_meas + a_lg[1] * ang) + a_lg[2] * cp) / (n_meas *
-            sp);
+        f_b[2] = d_b_idx_1;
+        f_b[1] = ang;
+        f_b[0] = w;
+        dt_meas = nav_norm(a_lg);
+        n_exp = nav_norm(f_b);
+        d_b_idx_3 = 1.0;
+        if ((dt_meas > 1.0E-6) && (n_exp > 1.0E-6)) {
+          d_b_idx_3 = ((a_lg[0] * w + a_lg[1] * ang) + a_lg[2] * d_b_idx_1) /
+            (dt_meas * n_exp);
         }
 
-        if (acos(fmin(fmax(cy, -1.0), 1.0)) > 0.17453292519943295) {
+        if (acos(fmin(fmax(d_b_idx_3, -1.0), 1.0)) > 0.17453292519943295) {
           rtb_state_out.align_cnt = 0U;
+          rtb_state_out.baro_sum = 0.0;
           rtb_state_out.acc_sum[0] = 0.0F;
           rtb_state_out.gyr_sum[0] = 0.0F;
+          rtb_state_out.gnss_sum[0] = 0.0;
           rtb_state_out.acc_sum[1] = 0.0F;
           rtb_state_out.gyr_sum[1] = 0.0F;
+          rtb_state_out.gnss_sum[1] = 0.0;
           rtb_state_out.acc_sum[2] = 0.0F;
           rtb_state_out.gyr_sum[2] = 0.0F;
-          rtb_state_out.baro_sum = 0.0F;
+          rtb_state_out.gnss_sum[2] = 0.0;
+          rtb_state_out.gnss_cnt = 0U;
 
           /* MATLAB Function: '<Root>/EKF_Prediction' */
           memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof
@@ -937,13 +1044,23 @@ void nav_step(void)
           rtb_state_out.baro_ref_pa = (real32_T)(dt / ((real_T)
             state_in.align_cnt + 1.0));
           rtb_state_out.baro_ref_set = 1U;
+          rtb_state_out.pos_ned[0] = 0.0F;
+          rtb_state_out.pos_ned[1] = 0.0F;
+          rtb_state_out.pos_ned[2] = 0.0F;
+          if (gnss_cnt > 0) {
+            rtb_state_out.origin_lla[0] = theta[0] / (real_T)gnss_cnt;
+            rtb_state_out.origin_lla[1] = theta[1] / (real_T)gnss_cnt;
+            rtb_state_out.origin_lla[2] = theta[2] / (real_T)gnss_cnt;
+            rtb_state_out.origin_set = 1U;
+          }
+
           rtb_state_out.quat_nb[0] = (real32_T)q[0];
           rtb_state_out.quat_nb[1] = (real32_T)q[1];
           rtb_state_out.quat_nb[2] = (real32_T)q[2];
           rtb_state_out.quat_nb[3] = (real32_T)q[3];
           rtb_state_out.gyro_bias[0] = (real32_T)(omega_b[0] / ((real_T)
             state_in.align_cnt + 1.0));
-          rtb_state_out.accel_bias[0] = (real32_T)(a_lg[0] - dt_meas);
+          rtb_state_out.accel_bias[0] = (real32_T)(a_lg[0] - w);
           rtb_state_out.vel_ned[0] = 0.0F;
           rtb_state_out.gyro_bias[1] = (real32_T)(omega_b[1] / ((real_T)
             state_in.align_cnt + 1.0));
@@ -951,19 +1068,24 @@ void nav_step(void)
           rtb_state_out.vel_ned[1] = 0.0F;
           rtb_state_out.gyro_bias[2] = (real32_T)(omega_b[2] / ((real_T)
             state_in.align_cnt + 1.0));
-          rtb_state_out.accel_bias[2] = (real32_T)(a_lg[2] - cp);
+          rtb_state_out.accel_bias[2] = (real32_T)(a_lg[2] - d_b_idx_1);
           rtb_state_out.vel_ned[2] = 0.0F;
-          memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof
-                 (real32_T));
+          memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P_align[0], 225U *
+                 sizeof(real32_T));
           rtb_state_out.init_done = 1U;
+          rtb_state_out.align_ok = 1U;
           rtb_state_out.align_cnt = 0U;
+          rtb_state_out.baro_sum = 0.0;
           rtb_state_out.acc_sum[0] = 0.0F;
           rtb_state_out.gyr_sum[0] = 0.0F;
+          rtb_state_out.gnss_sum[0] = 0.0;
           rtb_state_out.acc_sum[1] = 0.0F;
           rtb_state_out.gyr_sum[1] = 0.0F;
+          rtb_state_out.gnss_sum[1] = 0.0;
           rtb_state_out.acc_sum[2] = 0.0F;
           rtb_state_out.gyr_sum[2] = 0.0F;
-          rtb_state_out.baro_sum = 0.0F;
+          rtb_state_out.gnss_sum[2] = 0.0;
+          rtb_state_out.gnss_cnt = 0U;
           guard1 = true;
         }
       } else {
@@ -973,13 +1095,17 @@ void nav_step(void)
           rtb_state_out.align_cnt = MAX_uint16_T;
         }
 
+        rtb_state_out.baro_sum = dt;
         rtb_state_out.acc_sum[0] = (real32_T)a_lg[0];
         rtb_state_out.gyr_sum[0] = (real32_T)omega_b[0];
+        rtb_state_out.gnss_sum[0] = theta[0];
         rtb_state_out.acc_sum[1] = (real32_T)a_lg[1];
         rtb_state_out.gyr_sum[1] = (real32_T)omega_b[1];
+        rtb_state_out.gnss_sum[1] = theta[1];
         rtb_state_out.acc_sum[2] = (real32_T)a_lg[2];
         rtb_state_out.gyr_sum[2] = (real32_T)omega_b[2];
-        rtb_state_out.baro_sum = (real32_T)dt;
+        rtb_state_out.gnss_sum[2] = theta[2];
+        rtb_state_out.gnss_cnt = (uint16_T)fmin(gnss_cnt, 65535.0);
 
         /* MATLAB Function: '<Root>/EKF_Prediction' */
         memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof
@@ -989,23 +1115,11 @@ void nav_step(void)
   } else {
     if (state_in.init_done == 0) {
       rtb_state_out = state_in;
-      n_meas = nav_tun.rail_elev_deg * 3.1415926535897931 / 180.0 * 0.5;
-      cp = cos(n_meas);
-      sp = sin(n_meas);
-      n_meas = nav_tun.rail_azim_deg * 3.1415926535897931 / 180.0 * 0.5;
-      cy = cos(n_meas);
-      sy = sin(n_meas);
-      n_meas = 0.0 * sp;
-      q[0] = n_meas * sy + cp * cy;
-      ang = 0.0 * cp;
-      q[1] = ang * cy - sp * sy;
-      q[2] = ang * sy + sp * cy;
-      q[3] = cp * sy - n_meas * cy;
-      n_meas = nav_norm_d4(q);
-      rtb_state_out.quat_nb[0] = (real32_T)(q[0] / n_meas);
-      rtb_state_out.quat_nb[1] = (real32_T)(q[1] / n_meas);
-      rtb_state_out.quat_nb[2] = (real32_T)(q[2] / n_meas);
-      rtb_state_out.quat_nb[3] = (real32_T)(q[3] / n_meas);
+      nav_quat_de_rampa(nav_tun.rail_elev_deg, nav_tun.rail_azim_deg, q);
+      rtb_state_out.quat_nb[0] = (real32_T)q[0];
+      rtb_state_out.quat_nb[1] = (real32_T)q[1];
+      rtb_state_out.quat_nb[2] = (real32_T)q[2];
+      rtb_state_out.quat_nb[3] = (real32_T)q[3];
       memcpy(&rtb_state_out.P[0], &nav_ConstP.pooled1.P0[0], 225U * sizeof
              (real32_T));
       rtb_state_out.init_done = 1U;
@@ -1019,7 +1133,7 @@ void nav_step(void)
       rtb_state_out.gyro_body[1] = (real32_T)omega_b[1];
       rtb_state_out.accel_body[2] = (real32_T)a_lg[2];
       rtb_state_out.gyro_body[2] = (real32_T)omega_b[2];
-      rtb_state_out.imu_blend_w = (real32_T)dt_meas;
+      rtb_state_out.imu_blend_w = (real32_T)w;
     } else if (nav_DW.NavState_Memory_PreviousInput.gnss_only == 1) {
       rtb_state_out = state_in;
       theta[0] = omega_b[0] * dt;
@@ -1027,40 +1141,40 @@ void nav_step(void)
       theta[2] = omega_b[2] * dt;
       ang = nav_norm(theta);
       if (ang > 1.0E-12) {
-        n_meas = 0.5 * ang;
-        sy = sin(n_meas);
-        n_meas = cos(n_meas);
-        cp = theta[0] / ang * sy;
-        sp = theta[1] / ang * sy;
-        cy = theta[2] / ang * sy;
+        dt_meas = 0.5 * ang;
+        b_b = sin(dt_meas);
+        dt_meas = cos(dt_meas);
+        d_b_idx_1 = theta[0] / ang * b_b;
+        n_exp = theta[1] / ang * b_b;
+        d_b_idx_3 = theta[2] / ang * b_b;
       } else {
-        n_meas = 1.0;
-        cp = 0.5 * theta[0];
-        sp = 0.5 * theta[1];
-        cy = 0.5 * theta[2];
+        dt_meas = 1.0;
+        d_b_idx_1 = 0.5 * theta[0];
+        n_exp = 0.5 * theta[1];
+        d_b_idx_3 = 0.5 * theta[2];
       }
 
-      q_new[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_meas -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cp) -
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * sp) -
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * cy;
-      q_new[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cp + n_meas
-                   * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * cy) - sp *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_new[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * sp -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cy) +
-                  n_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + cp
-        * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_new[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cy +
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * sp) - cp *
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + n_meas *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      n_meas = nav_norm_d4(q_new);
-      rtb_state_out.quat_nb[0] = (real32_T)(q_new[0] / n_meas);
-      rtb_state_out.quat_nb[1] = (real32_T)(q_new[1] / n_meas);
-      rtb_state_out.quat_nb[2] = (real32_T)(q_new[2] / n_meas);
-      rtb_state_out.quat_nb[3] = (real32_T)(q_new[3] / n_meas);
+      q[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * dt_meas -
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_1) -
+              nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * n_exp) -
+        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * d_b_idx_3;
+      q[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_1 +
+               dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
+              nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * d_b_idx_3) -
+        n_exp * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_exp -
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_3) +
+              dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_3 +
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
+              d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      dt_meas = nav_norm_cq(q);
+      rtb_state_out.quat_nb[0] = (real32_T)(q[0] / dt_meas);
+      rtb_state_out.quat_nb[1] = (real32_T)(q[1] / dt_meas);
+      rtb_state_out.quat_nb[2] = (real32_T)(q[2] / dt_meas);
+      rtb_state_out.quat_nb[3] = (real32_T)(q[3] / dt_meas);
       rtb_state_out.pos_ned[0] = (real32_T)
         (nav_DW.NavState_Memory_PreviousInput.vel_ned[0] * dt +
          nav_DW.NavState_Memory_PreviousInput.pos_ned[0]);
@@ -1079,7 +1193,7 @@ void nav_step(void)
       rtb_state_out.accel_ned[2] = 0.0F;
       rtb_state_out.accel_body[2] = (real32_T)f_b[2];
       rtb_state_out.gyro_body[2] = (real32_T)omega_b[2];
-      rtb_state_out.imu_blend_w = (real32_T)dt_meas;
+      rtb_state_out.imu_blend_w = (real32_T)w;
       rtb_state_out.timestamp_s =
         nav_DW.NavState_Memory_PreviousInput.timestamp_s + dt;
       rtb_state_out.gnss_age_s = (real32_T)fmin
@@ -1091,107 +1205,90 @@ void nav_step(void)
       theta[2] = omega_b[2] * dt;
       ang = nav_norm(theta);
       if (ang > 1.0E-12) {
-        n_meas = 0.5 * ang;
-        cy = sin(n_meas);
-        n_meas = cos(n_meas);
-        cp = theta[0] / ang * cy;
-        sp = theta[1] / ang * cy;
-        cy *= theta[2] / ang;
+        dt_meas = 0.5 * ang;
+        d_b_idx_3 = sin(dt_meas);
+        dt_meas = cos(dt_meas);
+        d_b_idx_1 = theta[0] / ang * d_b_idx_3;
+        n_exp = theta[1] / ang * d_b_idx_3;
+        d_b_idx_3 *= theta[2] / ang;
       } else {
-        n_meas = 1.0;
-        cp = 0.5 * theta[0];
-        sp = 0.5 * theta[1];
-        cy = 0.5 * theta[2];
+        dt_meas = 1.0;
+        d_b_idx_1 = 0.5 * theta[0];
+        n_exp = 0.5 * theta[1];
+        d_b_idx_3 = 0.5 * theta[2];
       }
 
-      q_new[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_meas -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cp) -
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * sp) -
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * cy;
-      q_new[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cp + n_meas
-                   * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * cy) - sp *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_new[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * sp -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cy) +
-                  n_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + cp
-        * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_new[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cy +
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * sp) - cp *
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + n_meas *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      n_meas = nav_norm_d4(q_new);
-      q_new[0] /= n_meas;
-      q_new[1] /= n_meas;
-      q_new[2] /= n_meas;
-      q_new[3] /= n_meas;
+      q[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * dt_meas -
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_1) -
+              nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * n_exp) -
+        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * d_b_idx_3;
+      q[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_1 +
+               dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
+              nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * d_b_idx_3) -
+        n_exp * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_exp -
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_3) +
+              dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_3 +
+               nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
+              d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      dt_meas = nav_norm_cq(q);
+      q[0] /= dt_meas;
+      q[1] /= dt_meas;
+      q[2] /= dt_meas;
+      q[3] /= dt_meas;
       if (ang > 1.0E-12) {
-        n_meas = 0.25 * ang;
-        cy = sin(n_meas);
-        n_meas = cos(n_meas);
-        cp = theta[0] / ang * cy;
-        sp = theta[1] / ang * cy;
-        cy *= theta[2] / ang;
+        dt_meas = 0.25 * ang;
+        d_b_idx_3 = sin(dt_meas);
+        dt_meas = cos(dt_meas);
+        d_b_idx_1 = theta[0] / ang * d_b_idx_3;
+        n_exp = theta[1] / ang * d_b_idx_3;
+        d_b_idx_3 *= theta[2] / ang;
       } else {
-        n_meas = 1.0;
-        cp = 0.25 * theta[0];
-        sp = 0.25 * theta[1];
-        cy = 0.25 * theta[2];
+        dt_meas = 1.0;
+        d_b_idx_1 = 0.25 * theta[0];
+        n_exp = 0.25 * theta[1];
+        d_b_idx_3 = 0.25 * theta[2];
       }
 
-      q_mid[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_meas -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cp) -
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * sp) -
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * cy;
-      q_mid[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cp + n_meas
-                   * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * cy) - sp *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_mid[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * sp -
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * cy) +
-                  n_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + cp
-        * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      q_mid[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * cy +
-                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * sp) - cp *
-                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) + n_meas *
-        nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      n_meas = nav_norm_d4(q_mid);
-      q[0] = q_mid[0] / n_meas;
-      q[1] = q_mid[1] / n_meas;
-      q[2] = q_mid[2] / n_meas;
-      q[3] = q_mid[3] / n_meas;
-      n_meas = q[3] * q[3];
-      ang = q[2] * q[2];
-      H_tmp[0] = 1.0 - (ang + n_meas) * 2.0;
-      cp = q[1] * q[2];
-      sp = q[0] * q[3];
-      H_tmp[3] = (cp - sp) * 2.0;
-      cy = q[1] * q[3];
-      sy = q[0] * q[2];
-      H_tmp[6] = (cy + sy) * 2.0;
-      H_tmp[1] = (cp + sp) * 2.0;
-      cp = q[1] * q[1];
-      H_tmp[4] = 1.0 - (cp + n_meas) * 2.0;
-      n_meas = q[2] * q[3];
-      sp = q[0] * q[1];
-      H_tmp[7] = (n_meas - sp) * 2.0;
-      H_tmp[2] = (cy - sy) * 2.0;
-      H_tmp[5] = (n_meas + sp) * 2.0;
-      H_tmp[8] = 1.0 - (cp + ang) * 2.0;
+      q_mid[0] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * dt_meas -
+                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_1)
+                  - nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * n_exp) -
+        nav_DW.NavState_Memory_PreviousInput.quat_nb[3] * d_b_idx_3;
+      q_mid[1] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_1 +
+                   dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) +
+                  nav_DW.NavState_Memory_PreviousInput.quat_nb[2] * d_b_idx_3) -
+        n_exp * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q_mid[2] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * n_exp -
+                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * d_b_idx_3)
+                  + dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      q_mid[3] = ((nav_DW.NavState_Memory_PreviousInput.quat_nb[0] * d_b_idx_3 +
+                   nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
+                  d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
+        dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
+      dt_meas = nav_norm_cq(q_mid);
+      q_mid_0[0] = q_mid[0] / dt_meas;
+      q_mid_0[1] = q_mid[1] / dt_meas;
+      q_mid_0[2] = q_mid[2] / dt_meas;
+      q_mid_0[3] = q_mid[3] / dt_meas;
+      nav_quat_to_dcm_bn(q_mid_0, H_tmp);
       ang = 0.0;
-      cp = 0.0;
-      sp = 0.0;
+      d_b_idx_1 = 0.0;
+      n_exp = 0.0;
       for (i = 0; i < 3; i++) {
-        n_meas = f_b[i];
-        ang += H_tmp[3 * i] * n_meas;
-        cp += H_tmp[3 * i + 1] * n_meas;
-        sp += H_tmp[3 * i + 2] * n_meas;
+        dt_meas = f_b[i];
+        ang += H_tmp[3 * i] * dt_meas;
+        d_b_idx_1 += H_tmp[3 * i + 1] * dt_meas;
+        n_exp += H_tmp[3 * i + 2] * dt_meas;
       }
 
-      rtb_state_out.quat_nb[0] = (real32_T)q_new[0];
-      rtb_state_out.quat_nb[1] = (real32_T)q_new[1];
-      rtb_state_out.quat_nb[2] = (real32_T)q_new[2];
-      rtb_state_out.quat_nb[3] = (real32_T)q_new[3];
+      rtb_state_out.quat_nb[0] = (real32_T)q[0];
+      rtb_state_out.quat_nb[1] = (real32_T)q[1];
+      rtb_state_out.quat_nb[2] = (real32_T)q[2];
+      rtb_state_out.quat_nb[3] = (real32_T)q[3];
       rtb_state_out.pos_ned[0] = (real32_T)(0.5 * ang * dt * dt +
         (nav_DW.NavState_Memory_PreviousInput.vel_ned[0] * dt +
          nav_DW.NavState_Memory_PreviousInput.pos_ned[0]));
@@ -1200,23 +1297,23 @@ void nav_step(void)
       rtb_state_out.accel_ned[0] = (real32_T)ang;
       rtb_state_out.accel_body[0] = (real32_T)f_b[0];
       rtb_state_out.gyro_body[0] = (real32_T)omega_b[0];
-      rtb_state_out.pos_ned[1] = (real32_T)(0.5 * cp * dt * dt +
+      rtb_state_out.pos_ned[1] = (real32_T)(0.5 * d_b_idx_1 * dt * dt +
         (nav_DW.NavState_Memory_PreviousInput.vel_ned[1] * dt +
          nav_DW.NavState_Memory_PreviousInput.pos_ned[1]));
-      rtb_state_out.vel_ned[1] = (real32_T)(cp * dt +
+      rtb_state_out.vel_ned[1] = (real32_T)(d_b_idx_1 * dt +
         nav_DW.NavState_Memory_PreviousInput.vel_ned[1]);
-      rtb_state_out.accel_ned[1] = (real32_T)cp;
+      rtb_state_out.accel_ned[1] = (real32_T)d_b_idx_1;
       rtb_state_out.accel_body[1] = (real32_T)f_b[1];
       rtb_state_out.gyro_body[1] = (real32_T)omega_b[1];
-      rtb_state_out.pos_ned[2] = (real32_T)((sp + 9.81) * 0.5 * dt * dt +
+      rtb_state_out.pos_ned[2] = (real32_T)((n_exp + 9.81) * 0.5 * dt * dt +
         (nav_DW.NavState_Memory_PreviousInput.vel_ned[2] * dt +
          nav_DW.NavState_Memory_PreviousInput.pos_ned[2]));
-      rtb_state_out.vel_ned[2] = (real32_T)((sp + 9.81) * dt +
+      rtb_state_out.vel_ned[2] = (real32_T)((n_exp + 9.81) * dt +
         nav_DW.NavState_Memory_PreviousInput.vel_ned[2]);
-      rtb_state_out.accel_ned[2] = (real32_T)(sp + 9.81);
+      rtb_state_out.accel_ned[2] = (real32_T)(n_exp + 9.81);
       rtb_state_out.accel_body[2] = (real32_T)f_b[2];
       rtb_state_out.gyro_body[2] = (real32_T)omega_b[2];
-      rtb_state_out.imu_blend_w = (real32_T)dt_meas;
+      rtb_state_out.imu_blend_w = (real32_T)w;
       rtb_state_out.timestamp_s =
         nav_DW.NavState_Memory_PreviousInput.timestamp_s + dt;
       rtb_state_out.gnss_age_s = (real32_T)fmin
@@ -1229,56 +1326,56 @@ void nav_step(void)
   if (guard1) {
     /* MATLAB Function: '<Root>/EKF_Prediction' */
     if (rtb_state_out.gnss_only != 1) {
-      dt = (real_T)rtb_state_out.quat_nb[3] * rtb_state_out.quat_nb[3];
-      dt_meas = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[2];
-      Cbn[0] = 1.0 - (dt_meas + dt) * 2.0;
-      n_meas = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[2];
+      dt_meas = (real_T)rtb_state_out.quat_nb[3] * rtb_state_out.quat_nb[3];
+      dt = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[2];
+      Cbn[0] = 1.0 - (dt + dt_meas) * 2.0;
+      w = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[2];
       ang = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[3];
-      Cbn[3] = (n_meas - ang) * 2.0;
-      cp = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[3];
-      sp = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[2];
-      Cbn[6] = (cp + sp) * 2.0;
-      Cbn[1] = (n_meas + ang) * 2.0;
-      n_meas = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[1];
-      Cbn[4] = 1.0 - (n_meas + dt) * 2.0;
-      dt = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[3];
+      Cbn[3] = (w - ang) * 2.0;
+      d_b_idx_1 = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[3];
+      n_exp = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[2];
+      Cbn[6] = (d_b_idx_1 + n_exp) * 2.0;
+      Cbn[1] = (w + ang) * 2.0;
+      w = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[1];
+      Cbn[4] = 1.0 - (w + dt_meas) * 2.0;
+      dt_meas = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[3];
       ang = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[1];
-      Cbn[7] = (dt - ang) * 2.0;
-      Cbn[2] = (cp - sp) * 2.0;
-      Cbn[5] = (dt + ang) * 2.0;
-      Cbn[8] = 1.0 - (n_meas + dt_meas) * 2.0;
+      Cbn[7] = (dt_meas - ang) * 2.0;
+      Cbn[2] = (d_b_idx_1 - n_exp) * 2.0;
+      Cbn[5] = (dt_meas + ang) * 2.0;
+      Cbn[8] = 1.0 - (w + dt) * 2.0;
       dt = 0.0;
-      dt_meas = 0.0;
+      w = 0.0;
       ang = 0.0;
       for (i = 0; i < 3; i++) {
-        n_meas = rtb_state_out.accel_body[i];
-        dt += Cbn[3 * i] * n_meas;
-        dt_meas += Cbn[3 * i + 1] * n_meas;
-        ang += Cbn[3 * i + 2] * n_meas;
+        dt_meas = rtb_state_out.accel_body[i];
+        dt += Cbn[3 * i] * dt_meas;
+        w += Cbn[3 * i + 1] * dt_meas;
+        ang += Cbn[3 * i + 2] * dt_meas;
       }
 
       memset(&Fdt[0], 0, 225U * sizeof(real_T));
       Fdt[3] = -0.0;
       Fdt[18] = ang;
-      Fdt[33] = -dt_meas;
+      Fdt[33] = -w;
       Fdt[4] = -ang;
       Fdt[19] = -0.0;
       Fdt[34] = dt;
-      Fdt[5] = dt_meas;
+      Fdt[5] = w;
       Fdt[20] = -dt;
       Fdt[35] = -0.0;
       for (i = 0; i < 3; i++) {
-        dt = Cbn[3 * i];
-        Fdt_tmp = (i + 12) * 15;
-        Fdt[Fdt_tmp] = -dt;
-        Fdt_tmp_0 = (i + 9) * 15;
-        Fdt[Fdt_tmp_0 + 3] = dt;
-        dt = Cbn[3 * i + 1];
-        Fdt[Fdt_tmp + 1] = -dt;
-        Fdt[Fdt_tmp_0 + 4] = dt;
-        dt = Cbn[3 * i + 2];
-        Fdt[Fdt_tmp + 2] = -dt;
-        Fdt[Fdt_tmp_0 + 5] = dt;
+        dt_meas = Cbn[3 * i];
+        Cbn_tmp = (i + 12) * 15;
+        Fdt[Cbn_tmp] = -dt_meas;
+        gnss_cnt = (i + 9) * 15;
+        Fdt[gnss_cnt + 3] = dt_meas;
+        dt_meas = Cbn[3 * i + 1];
+        Fdt[Cbn_tmp + 1] = -dt_meas;
+        Fdt[gnss_cnt + 4] = dt_meas;
+        dt_meas = Cbn[3 * i + 2];
+        Fdt[Cbn_tmp + 2] = -dt_meas;
+        Fdt[gnss_cnt + 5] = dt_meas;
       }
 
       memset(&Cbn[0], 0, 9U * sizeof(real_T));
@@ -1286,40 +1383,40 @@ void nav_step(void)
       Cbn[4] = 1.0;
       Cbn[8] = 1.0;
       for (i = 0; i < 3; i++) {
-        Fdt_tmp = (i + 3) * 15;
-        Fdt[Fdt_tmp + 6] = Cbn[3 * i];
-        Fdt[Fdt_tmp + 7] = Cbn[3 * i + 1];
-        Fdt[Fdt_tmp + 8] = Cbn[3 * i + 2];
+        Cbn_tmp = (i + 3) * 15;
+        Fdt[Cbn_tmp + 6] = Cbn[3 * i];
+        Fdt[Cbn_tmp + 7] = Cbn[3 * i + 1];
+        Fdt[Cbn_tmp + 8] = Cbn[3 * i + 2];
       }
 
       for (i = 0; i < 225; i++) {
-        Fdt[i] *= 0.0025;
+        Fdt[i] *= 0.002403846153846154;
         P_pred[i] = 0.0;
       }
 
-      for (b_k = 0; b_k < 15; b_k++) {
-        P_pred[b_k + 15 * b_k] = 1.0;
-        memset(&Fdt_0[b_k * 15], 0, 15U * sizeof(real_T));
+      for (Cbn_tmp_0 = 0; Cbn_tmp_0 < 15; Cbn_tmp_0++) {
+        P_pred[Cbn_tmp_0 + 15 * Cbn_tmp_0] = 1.0;
+        memset(&Fdt_0[Cbn_tmp_0 * 15], 0, 15U * sizeof(real_T));
         for (i = 0; i < 15; i++) {
-          n_meas = Fdt[15 * b_k + i];
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            Fdt_tmp = 15 * b_k + Cbn_0;
-            Fdt_0[Fdt_tmp] += Fdt[15 * i + Cbn_0] * n_meas;
+          dt_meas = Fdt[15 * Cbn_tmp_0 + i];
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            Cbn_tmp = 15 * Cbn_tmp_0 + gnss_cnt;
+            Fdt_0[Cbn_tmp] += Fdt[15 * i + gnss_cnt] * dt_meas;
           }
         }
       }
 
-      omega_b[0] = rtb_state_out.accel_body[0];
-      omega_b[1] = rtb_state_out.accel_body[1];
-      omega_b[2] = rtb_state_out.accel_body[2];
-      dt = ((1.0 - rtb_state_out.imu_blend_w) * 0.02 + rtb_state_out.imu_blend_w
-            * 0.35) + 0.01 * nav_norm(omega_b);
-      omega_b[0] = rtb_state_out.gyro_body[0];
-      omega_b[1] = rtb_state_out.gyro_body[1];
-      omega_b[2] = rtb_state_out.gyro_body[2];
-      dt_meas = 0.005 * nav_norm(omega_b) + 0.00052359877559829881;
-      cy = dt_meas * dt_meas;
-      sy = dt * dt;
+      theta[0] = rtb_state_out.accel_body[0];
+      theta[1] = rtb_state_out.accel_body[1];
+      theta[2] = rtb_state_out.accel_body[2];
+      dt_meas = ((1.0 - rtb_state_out.imu_blend_w) * 0.02 +
+                 rtb_state_out.imu_blend_w * 0.35) + 0.01 * nav_norm(theta);
+      theta[0] = rtb_state_out.gyro_body[0];
+      theta[1] = rtb_state_out.gyro_body[1];
+      theta[2] = rtb_state_out.gyro_body[2];
+      dt = 0.005 * nav_norm(theta) + 0.00052359877559829881;
+      d_b_idx_3 = dt * dt;
+      b_b = dt_meas * dt_meas;
       for (i = 0; i < 225; i++) {
         Phi[i] = (P_pred[i] + Fdt[i]) + 0.5 * Fdt_0[i];
         Fdt[i] = 0.0;
@@ -1330,74 +1427,75 @@ void nav_step(void)
       }
 
       for (i = 0; i < 3; i++) {
-        Cbn_0 = (int32_T)Cbn[3 * i];
-        Fdt[15 * i] = (real_T)Cbn_0 * cy;
-        Fdt_tmp = (i + 3) * 15;
-        Fdt[Fdt_tmp + 3] = (real_T)Cbn_0 * sy;
-        Fdt_tmp_0 = (i + 9) * 15;
-        Fdt[Fdt_tmp_0 + 9] = (real_T)Cbn_0 * 1.0E-8;
-        b_k = (i + 12) * 15;
-        Fdt[b_k + 12] = (real_T)Cbn_0 * 1.0E-12;
-        Cbn_0 = (int32_T)Cbn[3 * i + 1];
-        Fdt[15 * i + 1] = (real_T)Cbn_0 * cy;
-        Fdt[Fdt_tmp + 4] = (real_T)Cbn_0 * sy;
-        Fdt[Fdt_tmp_0 + 10] = (real_T)Cbn_0 * 1.0E-8;
-        Fdt[b_k + 13] = (real_T)Cbn_0 * 1.0E-12;
-        Cbn_0 = (int32_T)Cbn[3 * i + 2];
-        Fdt[15 * i + 2] = (real_T)Cbn_0 * cy;
-        Fdt[Fdt_tmp + 5] = (real_T)Cbn_0 * sy;
-        Fdt[Fdt_tmp_0 + 11] = (real_T)Cbn_0 * 1.0E-8;
-        Fdt[b_k + 14] = (real_T)Cbn_0 * 1.0E-12;
+        Cbn_tmp_0 = (int32_T)Cbn[3 * i];
+        Fdt[15 * i] = (real_T)Cbn_tmp_0 * d_b_idx_3;
+        Cbn_tmp = (i + 3) * 15;
+        Fdt[Cbn_tmp + 3] = (real_T)Cbn_tmp_0 * b_b;
+        gnss_cnt = (i + 9) * 15;
+        Fdt[gnss_cnt + 9] = (real_T)Cbn_tmp_0 * 1.0E-8;
+        Fdt_tmp = (i + 12) * 15;
+        Fdt[Fdt_tmp + 12] = (real_T)Cbn_tmp_0 * 1.0E-12;
+        Cbn_tmp_0 = (int32_T)Cbn[3 * i + 1];
+        Fdt[15 * i + 1] = (real_T)Cbn_tmp_0 * d_b_idx_3;
+        Fdt[Cbn_tmp + 4] = (real_T)Cbn_tmp_0 * b_b;
+        Fdt[gnss_cnt + 10] = (real_T)Cbn_tmp_0 * 1.0E-8;
+        Fdt[Fdt_tmp + 13] = (real_T)Cbn_tmp_0 * 1.0E-12;
+        Cbn_tmp_0 = (int32_T)Cbn[3 * i + 2];
+        Fdt[15 * i + 2] = (real_T)Cbn_tmp_0 * d_b_idx_3;
+        Fdt[Cbn_tmp + 5] = (real_T)Cbn_tmp_0 * b_b;
+        Fdt[gnss_cnt + 11] = (real_T)Cbn_tmp_0 * 1.0E-8;
+        Fdt[Fdt_tmp + 14] = (real_T)Cbn_tmp_0 * 1.0E-12;
       }
 
       for (i = 0; i < 15; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          Fdt_tmp = 15 * i + Cbn_0;
-          Fdt_0[Fdt_tmp] = Phi[15 * Cbn_0 + i];
-          Phi_0[Fdt_tmp] = 0.0;
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          Cbn_tmp = 15 * i + gnss_cnt;
+          Fdt_0[Cbn_tmp] = Phi[15 * gnss_cnt + i];
+          Phi_0[Cbn_tmp] = 0.0;
         }
 
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          Fdt_tmp_0 = 15 * i + Cbn_0;
-          n_meas = rtb_state_out.P[Fdt_tmp_0];
-          for (Fdt_tmp = 0; Fdt_tmp < 15; Fdt_tmp++) {
-            b_k = 15 * i + Fdt_tmp;
-            Phi_0[b_k] += Phi[15 * Cbn_0 + Fdt_tmp] * n_meas;
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          Cbn_tmp = 15 * i + gnss_cnt;
+          dt_meas = rtb_state_out.P[Cbn_tmp];
+          for (Cbn_tmp_0 = 0; Cbn_tmp_0 < 15; Cbn_tmp_0++) {
+            Fdt_tmp = 15 * i + Cbn_tmp_0;
+            Phi_0[Fdt_tmp] += Phi[15 * gnss_cnt + Cbn_tmp_0] * dt_meas;
           }
 
-          Phi_1[Fdt_tmp_0] = 0.0;
+          Phi_1[Cbn_tmp] = 0.0;
         }
 
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          n_meas = Fdt[15 * i + Cbn_0];
-          for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-            b_k = 15 * i + Fdt_tmp_0;
-            Phi_1[b_k] += Phi[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          dt_meas = Fdt[15 * i + gnss_cnt];
+          for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+            Fdt_tmp = 15 * i + Cbn_tmp;
+            Phi_1[Fdt_tmp] += Phi[15 * gnss_cnt + Cbn_tmp] * dt_meas;
           }
-        }
-      }
-
-      for (i = 0; i < 15; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          n_meas = 0.0;
-          ang = 0.0;
-          for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-            dt = Fdt_0[15 * Cbn_0 + Fdt_tmp_0];
-            Fdt_tmp = 15 * Fdt_tmp_0 + i;
-            n_meas += Phi_1[Fdt_tmp] * dt;
-            ang += Phi_0[Fdt_tmp] * dt;
-          }
-
-          b_k = 15 * Cbn_0 + i;
-          P_pred[b_k] = (Fdt[b_k] + n_meas) * 0.5 * 0.0025 + ang;
         }
       }
 
       for (i = 0; i < 15; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          Fdt_tmp_0 = 15 * i + Cbn_0;
-          rtb_state_out.P[Fdt_tmp_0] = (real32_T)((P_pred[15 * Cbn_0 + i] +
-            P_pred[Fdt_tmp_0]) * 0.5);
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          dt_meas = 0.0;
+          dt = 0.0;
+          for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+            w = Fdt_0[15 * gnss_cnt + Cbn_tmp];
+            Cbn_tmp_0 = 15 * Cbn_tmp + i;
+            dt_meas += Phi_1[Cbn_tmp_0] * w;
+            dt += Phi_0[Cbn_tmp_0] * w;
+          }
+
+          Fdt_tmp = 15 * gnss_cnt + i;
+          P_pred[Fdt_tmp] = (Fdt[Fdt_tmp] + dt_meas) * 0.5 *
+            0.002403846153846154 + dt;
+        }
+      }
+
+      for (i = 0; i < 15; i++) {
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          Cbn_tmp = 15 * i + gnss_cnt;
+          rtb_state_out.P[Cbn_tmp] = (real32_T)((P_pred[15 * gnss_cnt + i] +
+            P_pred[Cbn_tmp]) * 0.5);
         }
       }
     }
@@ -1407,12 +1505,12 @@ void nav_step(void)
 
   /* MATLAB Function: '<Root>/EKF_Update' incorporates:
    *  BusCreator generated from: '<Root>/EKF_Update'
-   *  BusCreator generated from: '<Root>/INS_Mechanization'
    *  Inport: '<Root>/nav_in'
    */
   nav_DW.NavState_Memory_PreviousInput = rtb_state_out;
-  if ((rtb_state_out.origin_set == 0) && ((nav_U.nav_in.gnss.data_valid == 1) &&
-       (nav_U.nav_in.gnss.fix_type >= 3))) {
+  if ((rtb_state_out.origin_set == 0) && (rtb_state_out.init_done == 1) &&
+      ((nav_U.nav_in.gnss.data_valid == 1) && (nav_U.nav_in.gnss.fix_type >= 3)))
+  {
     nav_DW.NavState_Memory_PreviousInput.origin_lla[0] =
       nav_U.nav_in.gnss.pos_lla[0];
     nav_DW.NavState_Memory_PreviousInput.origin_lla[1] =
@@ -1426,12 +1524,12 @@ void nav_step(void)
     if (rtb_state_out.vel_ned[2] > 2.0F) {
       if (-(real_T)rtb_state_out.pos_ned[2] >= 100.0) {
         if (nav_DW.NavState_Memory_PreviousInput.descent_cnt < 65535) {
-          tmp_1 = rtb_state_out.descent_cnt + 1U;
+          tmp_2 = rtb_state_out.descent_cnt + 1U;
           if (rtb_state_out.descent_cnt + 1U > 65535U) {
-            tmp_1 = 65535U;
+            tmp_2 = 65535U;
           }
 
-          nav_DW.NavState_Memory_PreviousInput.descent_cnt = (uint16_T)tmp_1;
+          nav_DW.NavState_Memory_PreviousInput.descent_cnt = (uint16_T)tmp_2;
         }
       } else {
         nav_DW.NavState_Memory_PreviousInput.descent_cnt = 0U;
@@ -1440,7 +1538,7 @@ void nav_step(void)
       nav_DW.NavState_Memory_PreviousInput.descent_cnt = 0U;
     }
 
-    if (nav_DW.NavState_Memory_PreviousInput.descent_cnt >= 200) {
+    if (nav_DW.NavState_Memory_PreviousInput.descent_cnt >= 208) {
       nav_DW.NavState_Memory_PreviousInput.gnss_only = 1U;
     }
   }
@@ -1449,26 +1547,15 @@ void nav_step(void)
               3) && (nav_U.nav_in.gnss.num_sats >= 5));
   if (rtb_state_out.gnss_only == 1) {
     if (use_pos && (nav_DW.NavState_Memory_PreviousInput.origin_set == 1)) {
-      dt = sin(nav_DW.NavState_Memory_PreviousInput.origin_lla[0]);
-      dt = 1.0 - 0.00669437999014 * dt * dt;
-      dt_meas = sqrt(dt);
-      nav_DW.NavState_Memory_PreviousInput.pos_ned[0] = (real32_T)
-        ((6.3354393272928288E+6 / (dt * dt_meas) +
-          nav_DW.NavState_Memory_PreviousInput.origin_lla[2]) *
-         (nav_U.nav_in.gnss.pos_lla[0] -
-          nav_DW.NavState_Memory_PreviousInput.origin_lla[0]));
-      nav_DW.NavState_Memory_PreviousInput.pos_ned[1] = (real32_T)((6.378137E+6 /
-        dt_meas + nav_DW.NavState_Memory_PreviousInput.origin_lla[2]) *
-        (nav_U.nav_in.gnss.pos_lla[1] -
-         nav_DW.NavState_Memory_PreviousInput.origin_lla[1]) * cos
-        (nav_DW.NavState_Memory_PreviousInput.origin_lla[0]));
-      nav_DW.NavState_Memory_PreviousInput.pos_ned[2] = (real32_T)
-        -(nav_U.nav_in.gnss.pos_lla[2] -
-          nav_DW.NavState_Memory_PreviousInput.origin_lla[2]);
+      nav_lla_to_ned(nav_U.nav_in.gnss.pos_lla,
+                     nav_DW.NavState_Memory_PreviousInput.origin_lla, f_b);
+      nav_DW.NavState_Memory_PreviousInput.pos_ned[0] = (real32_T)f_b[0];
       nav_DW.NavState_Memory_PreviousInput.vel_ned[0] =
         nav_U.nav_in.gnss.vel_ned[0];
+      nav_DW.NavState_Memory_PreviousInput.pos_ned[1] = (real32_T)f_b[1];
       nav_DW.NavState_Memory_PreviousInput.vel_ned[1] =
         nav_U.nav_in.gnss.vel_ned[1];
+      nav_DW.NavState_Memory_PreviousInput.pos_ned[2] = (real32_T)f_b[2];
       nav_DW.NavState_Memory_PreviousInput.vel_ned[2] =
         nav_U.nav_in.gnss.vel_ned[2];
       nav_DW.NavState_Memory_PreviousInput.gnss_age_s = 0.0F;
@@ -1477,135 +1564,121 @@ void nav_step(void)
   } else {
     if (use_pos && (nav_DW.NavState_Memory_PreviousInput.origin_set == 1) &&
         (rtb_state_out.init_done == 1)) {
-      dt = (real_T)rtb_state_out.quat_nb[3] * rtb_state_out.quat_nb[3];
-      dt_meas = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[2];
-      Cbn[0] = 1.0 - (dt_meas + dt) * 2.0;
-      n_meas = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[2];
+      dt_meas = (real_T)rtb_state_out.quat_nb[3] * rtb_state_out.quat_nb[3];
+      dt = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[2];
+      Cbn[0] = 1.0 - (dt + dt_meas) * 2.0;
+      w = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[2];
       ang = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[3];
-      Cbn[3] = (n_meas - ang) * 2.0;
-      cp = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[3];
-      sp = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[2];
-      Cbn[6] = (cp + sp) * 2.0;
-      Cbn[1] = (n_meas + ang) * 2.0;
-      n_meas = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[1];
-      Cbn[4] = 1.0 - (n_meas + dt) * 2.0;
-      dt = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[3];
+      Cbn[3] = (w - ang) * 2.0;
+      d_b_idx_1 = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[3];
+      n_exp = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[2];
+      Cbn[6] = (d_b_idx_1 + n_exp) * 2.0;
+      Cbn[1] = (w + ang) * 2.0;
+      w = (real_T)rtb_state_out.quat_nb[1] * rtb_state_out.quat_nb[1];
+      Cbn[4] = 1.0 - (w + dt_meas) * 2.0;
+      dt_meas = (real_T)rtb_state_out.quat_nb[2] * rtb_state_out.quat_nb[3];
       ang = (real_T)rtb_state_out.quat_nb[0] * rtb_state_out.quat_nb[1];
-      Cbn[7] = (dt - ang) * 2.0;
-      Cbn[2] = (cp - sp) * 2.0;
-      Cbn[5] = (dt + ang) * 2.0;
-      Cbn[8] = 1.0 - (n_meas + dt_meas) * 2.0;
+      Cbn[7] = (dt_meas - ang) * 2.0;
+      Cbn[2] = (d_b_idx_1 - n_exp) * 2.0;
+      Cbn[5] = (dt_meas + ang) * 2.0;
+      Cbn[8] = 1.0 - (w + dt) * 2.0;
       a_lg[0] = 0.0;
       a_lg[1] = 0.0;
       a_lg[2] = 0.0;
-      dt = 0.0 * rtb_state_out.gyro_body[2];
-      dt_meas = rtb_state_out.gyro_body[1] * 0.0;
-      theta[0] = dt_meas - dt;
-      n_meas = rtb_state_out.gyro_body[0] * 0.0;
-      theta[1] = dt - n_meas;
-      theta[2] = n_meas - dt_meas;
       dt = 0.0;
-      dt_meas = 0.0;
+      w = 0.0;
       ang = 0.0;
-      cp = 0.0;
-      sp = 0.0;
-      cy = 0.0;
       for (i = 0; i < 3; i++) {
-        sy = Cbn[3 * i];
-        dt += sy * 0.0;
-        dt_meas_tmp = Cbn[3 * i + 1];
-        dt_meas += dt_meas_tmp * 0.0;
-        ang_tmp = Cbn[3 * i + 2];
-        ang += ang_tmp * 0.0;
-        n_meas = theta[i];
-        cp += sy * n_meas;
-        sp += dt_meas_tmp * n_meas;
-        cy += ang_tmp * n_meas;
+        dt += Cbn[3 * i] * 0.0;
+        w += Cbn[3 * i + 1] * 0.0;
+        ang += Cbn[3 * i + 2] * 0.0;
+        theta[i] = rtb_state_out.gyro_body[i];
       }
 
-      n_meas = sin(nav_DW.NavState_Memory_PreviousInput.origin_lla[0]);
-      n_meas = 1.0 - 0.00669437999014 * n_meas * n_meas;
-      sy = sqrt(n_meas);
-      z[0] = (6.3354393272928288E+6 / (n_meas * sy) +
-              nav_DW.NavState_Memory_PreviousInput.origin_lla[2]) *
-        (nav_U.nav_in.gnss.pos_lla[0] -
-         nav_DW.NavState_Memory_PreviousInput.origin_lla[0]) -
-        (rtb_state_out.pos_ned[0] + dt);
-      z[1] = (6.378137E+6 / sy +
-              nav_DW.NavState_Memory_PreviousInput.origin_lla[2]) *
-        (nav_U.nav_in.gnss.pos_lla[1] -
-         nav_DW.NavState_Memory_PreviousInput.origin_lla[1]) * cos
-        (nav_DW.NavState_Memory_PreviousInput.origin_lla[0]) -
-        (rtb_state_out.pos_ned[1] + dt_meas);
-      z[2] = -(nav_U.nav_in.gnss.pos_lla[2] -
-               nav_DW.NavState_Memory_PreviousInput.origin_lla[2]) -
-        (rtb_state_out.pos_ned[2] + ang);
-      z[3] = nav_U.nav_in.gnss.vel_ned[0] - (rtb_state_out.vel_ned[0] + cp);
-      z[4] = nav_U.nav_in.gnss.vel_ned[1] - (rtb_state_out.vel_ned[1] + sp);
-      z[5] = nav_U.nav_in.gnss.vel_ned[2] - (rtb_state_out.vel_ned[2] + cy);
+      nav_cross(theta, a_lg, f_b);
+      d_b_idx_1 = 0.0;
+      n_exp = 0.0;
+      d_b_idx_3 = 0.0;
+      for (i = 0; i < 3; i++) {
+        dt_meas = f_b[i];
+        d_b_idx_1 += Cbn[3 * i] * dt_meas;
+        n_exp += Cbn[3 * i + 1] * dt_meas;
+        d_b_idx_3 += Cbn[3 * i + 2] * dt_meas;
+      }
+
+      nav_lla_to_ned(nav_U.nav_in.gnss.pos_lla,
+                     nav_DW.NavState_Memory_PreviousInput.origin_lla, f_b);
+      z[0] = f_b[0] - (rtb_state_out.pos_ned[0] + dt);
+      z[3] = nav_U.nav_in.gnss.vel_ned[0] - (rtb_state_out.vel_ned[0] +
+        d_b_idx_1);
+      z[1] = f_b[1] - (rtb_state_out.pos_ned[1] + w);
+      z[4] = nav_U.nav_in.gnss.vel_ned[1] - (rtb_state_out.vel_ned[1] + n_exp);
+      z[2] = f_b[2] - (rtb_state_out.pos_ned[2] + ang);
+      z[5] = nav_U.nav_in.gnss.vel_ned[2] - (rtb_state_out.vel_ned[2] +
+        d_b_idx_3);
       memset(&H[0], 0, 90U * sizeof(real_T));
       nav_eye(H_tmp);
       for (i = 0; i < 3; i++) {
-        n_meas = H_tmp[3 * i];
-        Fdt_tmp = (i + 6) * 6;
-        H[Fdt_tmp] = n_meas;
-        Cbn_0 = (i + 3) * 6;
-        H[Cbn_0 + 3] = n_meas;
-        n_meas = H_tmp[3 * i + 1];
-        H[Fdt_tmp + 1] = n_meas;
-        H[Cbn_0 + 4] = n_meas;
-        n_meas = H_tmp[3 * i + 2];
-        H[Fdt_tmp + 2] = n_meas;
-        H[Cbn_0 + 5] = n_meas;
+        dt_meas = H_tmp[3 * i];
+        Cbn_tmp_0 = (i + 6) * 6;
+        H[Cbn_tmp_0] = dt_meas;
+        gnss_cnt = (i + 3) * 6;
+        H[gnss_cnt + 3] = dt_meas;
+        dt_meas = H_tmp[3 * i + 1];
+        H[Cbn_tmp_0 + 1] = dt_meas;
+        H[gnss_cnt + 4] = dt_meas;
+        dt_meas = H_tmp[3 * i + 2];
+        H[Cbn_tmp_0 + 2] = dt_meas;
+        H[gnss_cnt + 5] = dt_meas;
       }
 
       if (nav_norm(a_lg) > 1.0E-6) {
         H[0] = -0.0;
         H[6] = ang;
-        H[12] = -dt_meas;
+        H[12] = -w;
         H[1] = -ang;
         H[7] = -0.0;
         H[13] = dt;
-        H[2] = dt_meas;
+        H[2] = w;
         H[8] = -dt;
         H[14] = -0.0;
         H[3] = -0.0;
-        H[9] = cy;
-        H[15] = -sp;
-        H[4] = -cy;
+        H[9] = d_b_idx_3;
+        H[15] = -n_exp;
+        H[4] = -d_b_idx_3;
         H[10] = -0.0;
-        H[16] = cp;
-        H[5] = sp;
-        H[11] = -cp;
+        H[16] = d_b_idx_1;
+        H[5] = n_exp;
+        H[11] = -d_b_idx_1;
         H[17] = -0.0;
         for (i = 0; i < 3; i++) {
-          dt = 0.0;
           dt_meas = 0.0;
-          n_meas = 0.0;
-          for (Cbn_0 = 0; Cbn_0 < 3; Cbn_0++) {
-            dt += Cbn[3 * Cbn_0] * 0.0;
-            dt_meas += Cbn[3 * Cbn_0 + 1] * 0.0;
-            n_meas += Cbn[3 * Cbn_0 + 2] * 0.0;
+          dt = 0.0;
+          w = 0.0;
+          for (gnss_cnt = 0; gnss_cnt < 3; gnss_cnt++) {
+            dt_meas += Cbn[3 * gnss_cnt] * 0.0;
+            dt += Cbn[3 * gnss_cnt + 1] * 0.0;
+            w += Cbn[3 * gnss_cnt + 2] * 0.0;
           }
 
-          Fdt_tmp = (i + 12) * 6;
-          H[Fdt_tmp + 5] = n_meas;
-          H[Fdt_tmp + 4] = dt_meas;
-          H[Fdt_tmp + 3] = dt;
+          Cbn_tmp_0 = (i + 12) * 6;
+          H[Cbn_tmp_0 + 5] = w;
+          H[Cbn_tmp_0 + 4] = dt;
+          H[Cbn_tmp_0 + 3] = dt_meas;
         }
       }
 
       memset(&R[0], 0, 36U * sizeof(real_T));
       for (i = 0; i < 3; i++) {
         R[6 * i] = nav_ConstP.pooled1.R_gnss_pos[3 * i];
-        Cbn_0 = (i + 3) * 6;
-        R[Cbn_0 + 3] = nav_ConstP.pooled1.R_gnss_vel[3 * i];
-        Fdt_tmp = 3 * i + 1;
-        R[6 * i + 1] = nav_ConstP.pooled1.R_gnss_pos[Fdt_tmp];
-        R[Cbn_0 + 4] = nav_ConstP.pooled1.R_gnss_vel[Fdt_tmp];
-        Fdt_tmp = 3 * i + 2;
-        R[6 * i + 2] = nav_ConstP.pooled1.R_gnss_pos[Fdt_tmp];
-        R[Cbn_0 + 5] = nav_ConstP.pooled1.R_gnss_vel[Fdt_tmp];
+        gnss_cnt = (i + 3) * 6;
+        R[gnss_cnt + 3] = nav_ConstP.pooled1.R_gnss_vel[3 * i];
+        Cbn_tmp = 3 * i + 1;
+        R[6 * i + 1] = nav_ConstP.pooled1.R_gnss_pos[Cbn_tmp];
+        R[gnss_cnt + 4] = nav_ConstP.pooled1.R_gnss_vel[Cbn_tmp];
+        Cbn_tmp = 3 * i + 2;
+        R[6 * i + 2] = nav_ConstP.pooled1.R_gnss_pos[Cbn_tmp];
+        R[gnss_cnt + 5] = nav_ConstP.pooled1.R_gnss_vel[Cbn_tmp];
       }
 
       for (i = 0; i < 225; i++) {
@@ -1613,62 +1686,62 @@ void nav_step(void)
       }
 
       for (i = 0; i < 6; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          K[Cbn_0 + 15 * i] = H[6 * Cbn_0 + i];
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          K[gnss_cnt + 15 * i] = H[6 * gnss_cnt + i];
         }
       }
 
       for (i = 0; i < 15; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-          H_0[Cbn_0 + 6 * i] = 0.0;
+        for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+          H_0[gnss_cnt + 6 * i] = 0.0;
         }
 
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          n_meas = Fdt[15 * i + Cbn_0];
-          for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 6; Fdt_tmp_0++) {
-            Fdt_tmp = 6 * i + Fdt_tmp_0;
-            H_0[Fdt_tmp] += H[6 * Cbn_0 + Fdt_tmp_0] * n_meas;
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          dt_meas = Fdt[15 * i + gnss_cnt];
+          for (Cbn_tmp = 0; Cbn_tmp < 6; Cbn_tmp++) {
+            Cbn_tmp_0 = 6 * i + Cbn_tmp;
+            H_0[Cbn_tmp_0] += H[6 * gnss_cnt + Cbn_tmp] * dt_meas;
           }
         }
       }
 
       for (i = 0; i < 6; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-          n_meas = 0.0;
-          for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-            n_meas += H_0[6 * Fdt_tmp_0 + i] * K[15 * Cbn_0 + Fdt_tmp_0];
+        for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+          dt_meas = 0.0;
+          for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+            dt_meas += H_0[6 * Cbn_tmp + i] * K[15 * gnss_cnt + Cbn_tmp];
           }
 
-          Fdt_tmp = 6 * Cbn_0 + i;
-          S[Fdt_tmp] = R[Fdt_tmp] + n_meas;
+          Cbn_tmp = 6 * gnss_cnt + i;
+          S[Cbn_tmp] = R[Cbn_tmp] + dt_meas;
         }
       }
 
       for (i = 0; i < 6; i++) {
-        for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-          Fdt_tmp_0 = 6 * i + Cbn_0;
-          tmp_0[Fdt_tmp_0] = (S[6 * Cbn_0 + i] + S[Fdt_tmp_0]) * 0.5;
+        for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+          Cbn_tmp = 6 * i + gnss_cnt;
+          tmp_1[Cbn_tmp] = (S[6 * gnss_cnt + i] + S[Cbn_tmp]) * 0.5;
         }
       }
 
-      memcpy(&S[0], &tmp_0[0], 36U * sizeof(real_T));
+      memcpy(&S[0], &tmp_1[0], 36U * sizeof(real_T));
       for (i = 0; i < 3; i++) {
-        Cbn[3 * i] = S[6 * i];
-        Cbn[3 * i + 1] = S[6 * i + 1];
-        Cbn[3 * i + 2] = S[6 * i + 2];
+        H_tmp[3 * i] = S[6 * i];
+        H_tmp[3 * i + 1] = S[6 * i + 1];
+        H_tmp[3 * i + 2] = S[6 * i + 2];
       }
 
-      nav_mldivide(Cbn, &z[0], theta);
-      use_pos = ((z[0] * theta[0] + z[1] * theta[1]) + z[2] * theta[2] <= 60.0);
+      nav_mldivide(H_tmp, &z[0], f_b);
+      use_pos = ((z[0] * f_b[0] + z[1] * f_b[1]) + z[2] * f_b[2] <= 60.0);
       for (i = 0; i < 3; i++) {
-        Fdt_tmp = (i + 3) * 6;
-        Cbn[3 * i] = S[Fdt_tmp + 3];
-        Cbn[3 * i + 1] = S[Fdt_tmp + 4];
-        Cbn[3 * i + 2] = S[Fdt_tmp + 5];
+        Cbn_tmp = (i + 3) * 6;
+        H_tmp[3 * i] = S[Cbn_tmp + 3];
+        H_tmp[3 * i + 1] = S[Cbn_tmp + 4];
+        H_tmp[3 * i + 2] = S[Cbn_tmp + 5];
       }
 
-      nav_mldivide(Cbn, &z[3], theta);
-      lg_ok = ((theta[0] * z[3] + theta[1] * z[4]) + theta[2] * z[5] <= 60.0);
+      nav_mldivide(H_tmp, &z[3], f_b);
+      lg_ok = ((f_b[0] * z[3] + f_b[1] * z[4]) + f_b[2] * z[5] <= 60.0);
       hg_ok = false;
       if ((!use_pos) && (!lg_ok)) {
         if ((rtb_state_out.reject_cnt >= 20) || (rtb_state_out.gnss_age_s > 1.0F))
@@ -1693,44 +1766,37 @@ void nav_step(void)
         }
 
         nav_diag(theta, H_tmp);
-        for (b_k = 0; b_k < 3; b_k++) {
-          Fdt_tmp_0 = (b_k + 3) * 15;
-          Fdt[Fdt_tmp_0 + 3] = (Fdt[Fdt_tmp_0 + 3] + H_tmp[3 * b_k]) + Cbn[3 *
-            b_k] * 25.0;
-          Fdt_tmp = 3 * b_k + 1;
-          Fdt[Fdt_tmp_0 + 4] = (Fdt[Fdt_tmp_0 + 4] + H_tmp[Fdt_tmp]) +
-            Cbn[Fdt_tmp] * 25.0;
-          Fdt_tmp = 3 * b_k + 2;
-          Fdt[Fdt_tmp_0 + 5] = (Fdt[Fdt_tmp_0 + 5] + H_tmp[Fdt_tmp]) +
-            Cbn[Fdt_tmp] * 25.0;
-          dt = z[b_k];
-          theta[b_k] = dt * dt;
+        for (Cbn_tmp_0 = 0; Cbn_tmp_0 < 3; Cbn_tmp_0++) {
+          gnss_cnt = (Cbn_tmp_0 + 3) * 15;
+          Fdt[gnss_cnt + 3] = (Fdt[gnss_cnt + 3] + H_tmp[3 * Cbn_tmp_0]) + Cbn[3
+            * Cbn_tmp_0] * 25.0;
+          Cbn_tmp = 3 * Cbn_tmp_0 + 1;
+          Fdt[gnss_cnt + 4] = (Fdt[gnss_cnt + 4] + H_tmp[Cbn_tmp]) + Cbn[Cbn_tmp]
+            * 25.0;
+          Cbn_tmp = 3 * Cbn_tmp_0 + 2;
+          Fdt[gnss_cnt + 5] = (Fdt[gnss_cnt + 5] + H_tmp[Cbn_tmp]) + Cbn[Cbn_tmp]
+            * 25.0;
+          dt_meas = z[Cbn_tmp_0];
+          theta[Cbn_tmp_0] = dt_meas * dt_meas;
         }
 
         nav_diag(theta, H_tmp);
         for (i = 0; i < 3; i++) {
-          Cbn_0 = (int32_T)Cbn[3 * i];
-          Fdt_tmp_0 = (i + 6) * 15;
-          Fdt[Fdt_tmp_0 + 6] = (Fdt[Fdt_tmp_0 + 6] + H_tmp[3 * i]) + (real_T)
-            Cbn_0 * 100.0;
-          Fdt_tmp = (i + 9) * 15;
-          Fdt[Fdt_tmp + 9] += (real_T)Cbn_0 * 0.25;
-          b_k = 3 * i + 1;
-          Cbn_0 = (int32_T)Cbn[b_k];
-          Fdt[Fdt_tmp_0 + 7] = (Fdt[Fdt_tmp_0 + 7] + H_tmp[b_k]) + (real_T)Cbn_0
+          gnss_cnt = (i + 6) * 15;
+          Fdt[gnss_cnt + 6] = (Fdt[gnss_cnt + 6] + H_tmp[3 * i]) + Cbn[3 * i] *
+            100.0;
+          Cbn_tmp = 3 * i + 1;
+          Fdt[gnss_cnt + 7] = (Fdt[gnss_cnt + 7] + H_tmp[Cbn_tmp]) + Cbn[Cbn_tmp]
             * 100.0;
-          Fdt[Fdt_tmp + 10] += (real_T)Cbn_0 * 0.25;
-          b_k = 3 * i + 2;
-          Cbn_0 = (int32_T)Cbn[b_k];
-          Fdt[Fdt_tmp_0 + 8] = (Fdt[Fdt_tmp_0 + 8] + H_tmp[b_k]) + (real_T)Cbn_0
+          Cbn_tmp = 3 * i + 2;
+          Fdt[gnss_cnt + 8] = (Fdt[gnss_cnt + 8] + H_tmp[Cbn_tmp]) + Cbn[Cbn_tmp]
             * 100.0;
-          Fdt[Fdt_tmp + 11] += (real_T)Cbn_0 * 0.25;
         }
 
         for (i = 0; i < 15; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            Fdt_tmp_0 = 15 * i + Cbn_0;
-            Fdt_0[Fdt_tmp_0] = (Fdt[15 * Cbn_0 + i] + Fdt[Fdt_tmp_0]) * 0.5;
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            Cbn_tmp = 15 * i + gnss_cnt;
+            Fdt_0[Cbn_tmp] = (Fdt[15 * gnss_cnt + i] + Fdt[Cbn_tmp]) * 0.5;
           }
         }
 
@@ -1740,117 +1806,129 @@ void nav_step(void)
       if (use_pos || lg_ok) {
         if (!use_pos) {
           for (i = 0; i < 3; i++) {
-            R[6 * i] = d[3 * i];
-            R[6 * i + 1] = d[3 * i + 1];
-            R[6 * i + 2] = d[3 * i + 2];
+            R[6 * i] = e[3 * i];
+            R[6 * i + 1] = e[3 * i + 1];
+            R[6 * i + 2] = e[3 * i + 2];
           }
         }
 
         if (!lg_ok) {
           for (i = 0; i < 3; i++) {
-            Cbn_0 = (i + 3) * 6;
-            R[Cbn_0 + 3] = d[3 * i];
-            R[Cbn_0 + 4] = d[3 * i + 1];
-            R[Cbn_0 + 5] = d[3 * i + 2];
+            gnss_cnt = (i + 3) * 6;
+            R[gnss_cnt + 3] = e[3 * i];
+            R[gnss_cnt + 4] = e[3 * i + 1];
+            R[gnss_cnt + 5] = e[3 * i + 2];
           }
         }
 
         for (i = 0; i < 15; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-            H_0[Cbn_0 + 6 * i] = 0.0;
+          for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+            H_0[gnss_cnt + 6 * i] = 0.0;
           }
 
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            n_meas = Fdt[15 * i + Cbn_0];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 6; Fdt_tmp_0++) {
-              Fdt_tmp = 6 * i + Fdt_tmp_0;
-              H_0[Fdt_tmp] += H[6 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = Fdt[15 * i + gnss_cnt];
+            for (Cbn_tmp = 0; Cbn_tmp < 6; Cbn_tmp++) {
+              Cbn_tmp_0 = 6 * i + Cbn_tmp;
+              H_0[Cbn_tmp_0] += H[6 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
           }
         }
 
         for (i = 0; i < 6; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-            n_meas = 0.0;
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              n_meas += H_0[6 * Fdt_tmp_0 + i] * K[15 * Cbn_0 + Fdt_tmp_0];
+          for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+            dt_meas = 0.0;
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              dt_meas += H_0[6 * Cbn_tmp + i] * K[15 * gnss_cnt + Cbn_tmp];
             }
 
-            Fdt_tmp = 6 * Cbn_0 + i;
-            S[Fdt_tmp] = R[Fdt_tmp] + n_meas;
+            Cbn_tmp = 6 * gnss_cnt + i;
+            S[Cbn_tmp] = R[Cbn_tmp] + dt_meas;
           }
 
-          memset(&Fdt_1[i * 15], 0, 15U * sizeof(real_T));
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            n_meas = K[15 * i + Cbn_0];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              Fdt_tmp = 15 * i + Fdt_tmp_0;
-              Fdt_1[Fdt_tmp] += Fdt[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          memset(&tmp[i * 15], 0, 15U * sizeof(real_T));
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = K[15 * i + gnss_cnt];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Cbn_tmp_0 = 15 * i + Cbn_tmp;
+              tmp[Cbn_tmp_0] += Fdt[15 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
           }
         }
 
-        memcpy(&K[0], &Fdt_1[0], 90U * sizeof(real_T));
         for (i = 0; i < 6; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-            Fdt_tmp_0 = 6 * i + Cbn_0;
-            tmp_0[Fdt_tmp_0] = (S[6 * Cbn_0 + i] + S[Fdt_tmp_0]) * 0.5;
+          for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+            Cbn_tmp = 6 * i + gnss_cnt;
+            tmp_1[Cbn_tmp] = (S[6 * gnss_cnt + i] + S[Cbn_tmp]) * 0.5;
           }
         }
 
-        nav_mrdiv_o(K, tmp_0);
+        nav_mrdiv_l(tmp, tmp_1);
+        nav_estados_corregibles(false, hg_ok, K_b);
+        nav_diag_b(K_b, Fdt_0);
+        for (i = 0; i < 6; i++) {
+          memset(&K[i * 15], 0, 15U * sizeof(real_T));
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = tmp[15 * i + gnss_cnt];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Cbn_tmp_0 = 15 * i + Cbn_tmp;
+              K[Cbn_tmp_0] += Fdt_0[15 * gnss_cnt + Cbn_tmp] * dt_meas;
+            }
+          }
+        }
+
         nav_eye_d(Fdt_0);
         for (i = 0; i < 15; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            n_meas = 0.0;
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 6; Fdt_tmp_0++) {
-              n_meas += K[15 * Fdt_tmp_0 + i] * H[6 * Cbn_0 + Fdt_tmp_0];
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = 0.0;
+            for (Cbn_tmp = 0; Cbn_tmp < 6; Cbn_tmp++) {
+              dt_meas += K[15 * Cbn_tmp + i] * H[6 * gnss_cnt + Cbn_tmp];
             }
 
-            b_k = 15 * Cbn_0 + i;
-            P_pred[b_k] = Fdt_0[b_k] - n_meas;
-            Phi[Cbn_0 + 15 * i] = 0.0;
+            Fdt_tmp = 15 * gnss_cnt + i;
+            P_pred[Fdt_tmp] = Fdt_0[Fdt_tmp] - dt_meas;
+            Phi[gnss_cnt + 15 * i] = 0.0;
           }
         }
 
         for (i = 0; i < 15; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            n_meas = Fdt[15 * i + Cbn_0];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              b_k = 15 * i + Fdt_tmp_0;
-              Phi[b_k] += P_pred[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = Fdt[15 * i + gnss_cnt];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Fdt_tmp = 15 * i + Cbn_tmp;
+              Phi[Fdt_tmp] += P_pred[15 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
           }
         }
 
         for (i = 0; i < 6; i++) {
           memset(&H[i * 15], 0, 15U * sizeof(real_T));
-          for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-            n_meas = R[6 * i + Cbn_0];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              Fdt_tmp = 15 * i + Fdt_tmp_0;
-              H[Fdt_tmp] += K[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+            dt_meas = R[6 * i + gnss_cnt];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Cbn_tmp_0 = 15 * i + Cbn_tmp;
+              H[Cbn_tmp_0] += K[15 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
           }
         }
 
         for (i = 0; i < 15; i++) {
           memset(&Fdt_0[i * 15], 0, 15U * sizeof(real_T));
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            n_meas = P_pred[15 * Cbn_0 + i];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              b_k = 15 * i + Fdt_tmp_0;
-              Fdt_0[b_k] += Phi[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            dt_meas = P_pred[15 * gnss_cnt + i];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Fdt_tmp = 15 * i + Cbn_tmp;
+              Fdt_0[Fdt_tmp] += Phi[15 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
 
-            Phi_0[Cbn_0 + 15 * i] = 0.0;
+            Phi_0[gnss_cnt + 15 * i] = 0.0;
           }
 
-          for (Cbn_0 = 0; Cbn_0 < 6; Cbn_0++) {
-            n_meas = K[15 * Cbn_0 + i];
-            for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-              Fdt_tmp = 15 * i + Fdt_tmp_0;
-              Phi_0[Fdt_tmp] += H[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+          for (gnss_cnt = 0; gnss_cnt < 6; gnss_cnt++) {
+            dt_meas = K[15 * gnss_cnt + i];
+            for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+              Cbn_tmp_0 = 15 * i + Cbn_tmp;
+              Phi_0[Cbn_tmp_0] += H[15 * gnss_cnt + Cbn_tmp] * dt_meas;
             }
           }
         }
@@ -1861,25 +1939,24 @@ void nav_step(void)
 
         memset(&K_b[0], 0, 15U * sizeof(real_T));
         for (i = 0; i < 6; i++) {
-          n_meas = z[i];
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            K_b[Cbn_0] += K[15 * i + Cbn_0] * n_meas;
+          dt_meas = z[i];
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            K_b[gnss_cnt] += K[15 * i + gnss_cnt] * dt_meas;
           }
         }
 
         for (i = 0; i < 15; i++) {
-          for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-            Fdt_tmp_0 = 15 * i + Cbn_0;
-            Fdt_0[Fdt_tmp_0] = (Fdt[15 * Cbn_0 + i] + Fdt[Fdt_tmp_0]) * 0.5;
+          for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+            Cbn_tmp = 15 * i + gnss_cnt;
+            Fdt_0[Cbn_tmp] = (Fdt[15 * gnss_cnt + i] + Fdt[Cbn_tmp]) * 0.5;
           }
         }
 
         nav_apply_correction(&nav_DW.NavState_Memory_PreviousInput,
                              rtb_state_out.quat_nb, rtb_state_out.pos_ned,
-                             rtb_state_out.vel_ned, rtb_state_out.accel_body,
-                             rtb_state_out.accel_bias, rtb_state_out.gyro_bias,
-                             K_b, Fdt_0, 9.80665, 0.980665, 0.087266462599716474,
-                             2.0, true);
+                             rtb_state_out.vel_ned, rtb_state_out.accel_bias,
+                             rtb_state_out.gyro_bias, K_b, Fdt_0, 0.980665,
+                             0.087266462599716474);
         nav_DW.NavState_Memory_PreviousInput.gnss_age_s = 0.0F;
         nav_DW.NavState_Memory_PreviousInput.reject_cnt = 0U;
       }
@@ -1893,59 +1970,58 @@ void nav_step(void)
                   nav_DW.NavState_Memory_PreviousInput.baro_ref_pa,
                   0.19026120030795432)) * 44330.769230769227;
       dt = dt_meas - (-(real_T)nav_DW.NavState_Memory_PreviousInput.pos_ned[2]);
-      theta[0] = nav_DW.NavState_Memory_PreviousInput.vel_ned[0];
-      theta[1] = nav_DW.NavState_Memory_PreviousInput.vel_ned[1];
-      theta[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
-      n_meas = nav_norm(theta);
-      ang = nav_U.nav_in.baro.press_pa / 101325.0 * 1.225 * 0.5 * n_meas *
-        n_meas;
-      use_pos = (n_meas / sqrt(fmax(-0.0065 * dt_meas + 288.15, 150.0) * 401.87)
-                 > 0.75);
+      f_b[0] = nav_DW.NavState_Memory_PreviousInput.vel_ned[0];
+      f_b[1] = nav_DW.NavState_Memory_PreviousInput.vel_ned[1];
+      f_b[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
+      w = nav_norm(f_b);
+      ang = nav_U.nav_in.baro.press_pa / 101325.0 * 1.225 * 0.5 * w * w;
+      use_pos = (w / sqrt(fmax(-0.0065 * dt_meas + 288.15, 150.0) * 401.87) >
+                 0.75);
       if (use_pos) {
         nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt = 0U;
       }
 
-      dt_meas = 2.7777778086601757E-6 * ang * ang + 0.25;
+      w = 2.7777778086601757E-6 * ang * ang + 0.25;
       for (i = 0; i < 225; i++) {
         Fdt[i] = nav_DW.NavState_Memory_PreviousInput.P[i];
       }
 
       for (i = 0; i < 15; i++) {
-        S_b_tmp[i] = b_a[i];
-        S_b_tmp_0[i] = b_a[i];
+        S_b_tmp[i] = a[i];
+        S_b_tmp_0[i] = a[i];
         K_b[i] = 0.0;
       }
 
-      n_meas = 0.0;
+      dt_meas = 0.0;
       for (i = 0; i < 15; i++) {
         ang = K_b[i];
-        for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-          ang += Fdt[15 * i + Cbn_0] * (real_T)S_b_tmp[Cbn_0];
+        for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+          ang += Fdt[15 * i + gnss_cnt] * (real_T)S_b_tmp[gnss_cnt];
         }
 
         K_b[i] = ang;
-        n_meas += ang * (real_T)S_b_tmp_0[i];
+        dt_meas += ang * (real_T)S_b_tmp_0[i];
       }
 
-      ang = n_meas + dt_meas;
+      ang = dt_meas + w;
       if ((ang > 1.0E-9) && (!use_pos)) {
-        n_meas = dt * dt;
-        use_pos = (n_meas / ang <= 40.0);
+        dt_meas = dt * dt;
+        use_pos = (dt_meas / ang <= 40.0);
         if (!use_pos) {
-          if (nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt >= 33) {
+          if (nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt >= 35) {
             use_pos = true;
-            Fdt[128] += n_meas;
-            n_meas = 0.0;
+            Fdt[128] += dt_meas;
+            dt_meas = 0.0;
             for (i = 0; i < 15; i++) {
               ang = 0.0;
-              for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-                ang += Fdt[15 * i + Cbn_0] * (real_T)S_b_tmp[Cbn_0];
+              for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+                ang += Fdt[15 * i + gnss_cnt] * (real_T)S_b_tmp[gnss_cnt];
               }
 
-              n_meas += ang * (real_T)S_b_tmp_0[i];
+              dt_meas += ang * (real_T)S_b_tmp_0[i];
             }
 
-            ang = n_meas + dt_meas;
+            ang = dt_meas + w;
           } else {
             nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt++;
           }
@@ -1953,45 +2029,54 @@ void nav_step(void)
 
         if (use_pos && (ang > 1.0E-9)) {
           for (i = 0; i < 15; i++) {
-            n_meas = 0.0;
-            for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-              n_meas += Fdt[15 * Cbn_0 + i] * (real_T)S_b_tmp_0[Cbn_0];
+            dt_meas = 0.0;
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              dt_meas += Fdt[15 * gnss_cnt + i] * (real_T)S_b_tmp_0[gnss_cnt];
             }
 
-            K_b[i] = n_meas / ang;
+            Fdt_1[i] = dt_meas / ang;
+            K_b[i] = 0.0;
+          }
+
+          for (i = 0; i < 15; i++) {
+            dt_meas = Fdt_1[i];
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              K_b[gnss_cnt] += (real_T)b_a[15 * i + gnss_cnt] * dt_meas;
+            }
           }
 
           nav_eye_d(Fdt_0);
           for (i = 0; i < 15; i++) {
-            for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-              b_k = 15 * i + Cbn_0;
-              P_pred[b_k] = Fdt_0[b_k] - K_b[Cbn_0] * (real_T)S_b_tmp[i];
-              Phi[b_k] = 0.0;
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              Fdt_tmp = 15 * i + gnss_cnt;
+              P_pred[Fdt_tmp] = Fdt_0[Fdt_tmp] - K_b[gnss_cnt] * (real_T)
+                S_b_tmp[i];
+              Phi[Fdt_tmp] = 0.0;
             }
           }
 
           for (i = 0; i < 15; i++) {
-            for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-              Fdt_tmp_0 = 15 * i + Cbn_0;
-              n_meas = Fdt[Fdt_tmp_0];
-              for (Fdt_tmp = 0; Fdt_tmp < 15; Fdt_tmp++) {
-                b_k = 15 * i + Fdt_tmp;
-                Phi[b_k] += P_pred[15 * Cbn_0 + Fdt_tmp] * n_meas;
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              Cbn_tmp = 15 * i + gnss_cnt;
+              dt_meas = Fdt[Cbn_tmp];
+              for (Cbn_tmp_0 = 0; Cbn_tmp_0 < 15; Cbn_tmp_0++) {
+                Fdt_tmp = 15 * i + Cbn_tmp_0;
+                Phi[Fdt_tmp] += P_pred[15 * gnss_cnt + Cbn_tmp_0] * dt_meas;
               }
 
-              Fdt_0[Fdt_tmp_0] = 0.0;
+              Fdt_0[Cbn_tmp] = 0.0;
             }
           }
 
           for (i = 0; i < 15; i++) {
-            for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-              n_meas = P_pred[15 * Cbn_0 + i];
-              for (Fdt_tmp_0 = 0; Fdt_tmp_0 < 15; Fdt_tmp_0++) {
-                b_k = 15 * i + Fdt_tmp_0;
-                Fdt_0[b_k] += Phi[15 * Cbn_0 + Fdt_tmp_0] * n_meas;
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              dt_meas = P_pred[15 * gnss_cnt + i];
+              for (Cbn_tmp = 0; Cbn_tmp < 15; Cbn_tmp++) {
+                Fdt_tmp = 15 * i + Cbn_tmp;
+                Fdt_0[Fdt_tmp] += Phi[15 * gnss_cnt + Cbn_tmp] * dt_meas;
               }
 
-              Phi_0[Cbn_0 + 15 * i] = K_b[Cbn_0] * dt_meas * K_b[i];
+              Phi_0[gnss_cnt + 15 * i] = K_b[gnss_cnt] * w * K_b[i];
             }
           }
 
@@ -2000,73 +2085,71 @@ void nav_step(void)
           }
 
           for (i = 0; i < 15; i++) {
-            K_b_0[i] = K_b[i] * dt;
-            for (Cbn_0 = 0; Cbn_0 < 15; Cbn_0++) {
-              Fdt_tmp_0 = 15 * i + Cbn_0;
-              Fdt_0[Fdt_tmp_0] = (Fdt[15 * Cbn_0 + i] + Fdt[Fdt_tmp_0]) * 0.5;
+            Fdt_1[i] = K_b[i] * dt;
+            for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
+              Cbn_tmp = 15 * i + gnss_cnt;
+              Fdt_0[Cbn_tmp] = (Fdt[15 * gnss_cnt + i] + Fdt[Cbn_tmp]) * 0.5;
             }
           }
 
           for (i = 0; i < 4; i++) {
-            tmp_3[i] = nav_DW.NavState_Memory_PreviousInput.quat_nb[i];
+            tmp_4[i] = nav_DW.NavState_Memory_PreviousInput.quat_nb[i];
           }
 
           for (i = 0; i < 3; i++) {
-            tmp_4[i] = nav_DW.NavState_Memory_PreviousInput.pos_ned[i];
+            tmp_5[i] = nav_DW.NavState_Memory_PreviousInput.pos_ned[i];
           }
 
           for (i = 0; i < 3; i++) {
-            tmp_5[i] = nav_DW.NavState_Memory_PreviousInput.vel_ned[i];
+            tmp_6[i] = nav_DW.NavState_Memory_PreviousInput.vel_ned[i];
           }
 
           for (i = 0; i < 3; i++) {
-            tmp_6[i] = nav_DW.NavState_Memory_PreviousInput.accel_bias[i];
+            tmp_7[i] = nav_DW.NavState_Memory_PreviousInput.accel_bias[i];
           }
 
           for (i = 0; i < 3; i++) {
-            tmp_7[i] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[i];
+            tmp_8[i] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[i];
           }
 
-          nav_apply_correction(&nav_DW.NavState_Memory_PreviousInput, tmp_3,
-                               tmp_4, tmp_5,
-                               nav_DW.NavState_Memory_PreviousInput.accel_body,
-                               tmp_6, tmp_7, K_b_0, Fdt_0, 9.80665, 0.980665,
-                               0.087266462599716474, 2.0, false);
+          nav_apply_correction(&nav_DW.NavState_Memory_PreviousInput, tmp_4,
+                               tmp_5, tmp_6, tmp_7, tmp_8, Fdt_1, Fdt_0,
+                               0.980665, 0.087266462599716474);
           nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt = 0U;
         }
       }
     }
   }
 
-  tmp[0] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[0])) &&
-            (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[0])));
-  tmp[1] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[1])) &&
-            (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[1])));
-  tmp[2] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[2])) &&
-            (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[2])));
-  tmp[3] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[3])) &&
-            (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[3])));
-  if (nav_all(tmp)) {
-    theta[0] = nav_DW.NavState_Memory_PreviousInput.pos_ned[0];
-    theta[1] = nav_DW.NavState_Memory_PreviousInput.pos_ned[1];
-    theta[2] = nav_DW.NavState_Memory_PreviousInput.pos_ned[2];
-    nav_isfinite(theta, tmp_2);
-    if (nav_all_h(tmp_2)) {
-      theta[0] = nav_DW.NavState_Memory_PreviousInput.vel_ned[0];
-      theta[1] = nav_DW.NavState_Memory_PreviousInput.vel_ned[1];
-      theta[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
-      nav_isfinite(theta, tmp_2);
-      if (nav_all_h(tmp_2)) {
-        theta[0] = nav_DW.NavState_Memory_PreviousInput.accel_bias[0];
-        theta[1] = nav_DW.NavState_Memory_PreviousInput.accel_bias[1];
-        theta[2] = nav_DW.NavState_Memory_PreviousInput.accel_bias[2];
-        nav_isfinite(theta, tmp_2);
-        if (nav_all_h(tmp_2)) {
-          theta[0] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[0];
-          theta[1] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[1];
-          theta[2] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[2];
-          nav_isfinite(theta, tmp_2);
-          use_pos = nav_all_h(tmp_2);
+  tmp_0[0] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[0])) &&
+              (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[0])));
+  tmp_0[1] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[1])) &&
+              (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[1])));
+  tmp_0[2] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[2])) &&
+              (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[2])));
+  tmp_0[3] = ((!rtIsInf(nav_DW.NavState_Memory_PreviousInput.quat_nb[3])) &&
+              (!rtIsNaN(nav_DW.NavState_Memory_PreviousInput.quat_nb[3])));
+  if (nav_all(tmp_0)) {
+    f_b[0] = nav_DW.NavState_Memory_PreviousInput.pos_ned[0];
+    f_b[1] = nav_DW.NavState_Memory_PreviousInput.pos_ned[1];
+    f_b[2] = nav_DW.NavState_Memory_PreviousInput.pos_ned[2];
+    nav_isfinite(f_b, tmp_3);
+    if (nav_all_g(tmp_3)) {
+      f_b[0] = nav_DW.NavState_Memory_PreviousInput.vel_ned[0];
+      f_b[1] = nav_DW.NavState_Memory_PreviousInput.vel_ned[1];
+      f_b[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
+      nav_isfinite(f_b, tmp_3);
+      if (nav_all_g(tmp_3)) {
+        f_b[0] = nav_DW.NavState_Memory_PreviousInput.accel_bias[0];
+        f_b[1] = nav_DW.NavState_Memory_PreviousInput.accel_bias[1];
+        f_b[2] = nav_DW.NavState_Memory_PreviousInput.accel_bias[2];
+        nav_isfinite(f_b, tmp_3);
+        if (nav_all_g(tmp_3)) {
+          f_b[0] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[0];
+          f_b[1] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[1];
+          f_b[2] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[2];
+          nav_isfinite(f_b, tmp_3);
+          use_pos = nav_all_g(tmp_3);
         } else {
           use_pos = false;
         }
@@ -2110,6 +2193,24 @@ void nav_step(void)
     nav_DW.NavState_Memory_PreviousInput.gyr_sum[2] = 0.0F;
   }
 
+  flags = 0U;
+  if (nav_DW.NavState_Memory_PreviousInput.align_ok == 1) {
+    flags = 1U;
+  }
+
+  if (nav_DW.NavState_Memory_PreviousInput.baro_ref_set == 1) {
+    flags = (uint8_T)(flags | 2);
+  }
+
+  if (nav_DW.NavState_Memory_PreviousInput.origin_set == 1) {
+    flags = (uint8_T)(flags | 4);
+  }
+
+  if ((nav_DW.NavState_Memory_PreviousInput.init_done == 1) &&
+      (nav_DW.NavState_Memory_PreviousInput.align_ok == 0)) {
+    flags = (uint8_T)(flags | 8);
+  }
+
   /* Outport: '<Root>/nav_out' incorporates:
    *  MATLAB Function: '<Root>/EKF_Update'
    */
@@ -2125,7 +2226,7 @@ void nav_step(void)
   nav_Y.nav_out.quat_nb[3] = nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
 
   /* MATLAB Function: '<Root>/EKF_Update' */
-  n_meas = (real_T)nav_DW.NavState_Memory_PreviousInput.quat_nb[2] *
+  dt_meas = (real_T)nav_DW.NavState_Memory_PreviousInput.quat_nb[2] *
     nav_DW.NavState_Memory_PreviousInput.quat_nb[2];
 
   /* Outport: '<Root>/nav_out' incorporates:
@@ -2137,7 +2238,7 @@ void nav_step(void)
     nav_DW.NavState_Memory_PreviousInput.quat_nb[0] *
     nav_DW.NavState_Memory_PreviousInput.quat_nb[1]) * 2.0, 1.0 - ((real_T)
     nav_DW.NavState_Memory_PreviousInput.quat_nb[1] *
-    nav_DW.NavState_Memory_PreviousInput.quat_nb[1] + n_meas) * 2.0);
+    nav_DW.NavState_Memory_PreviousInput.quat_nb[1] + dt_meas) * 2.0);
   nav_Y.nav_out.euler_rpy[1] = (real32_T)asin(fmax(fmin(-(((real_T)
     nav_DW.NavState_Memory_PreviousInput.quat_nb[1] *
     nav_DW.NavState_Memory_PreviousInput.quat_nb[3] - (real_T)
@@ -2149,7 +2250,7 @@ void nav_step(void)
     nav_DW.NavState_Memory_PreviousInput.quat_nb[0] *
     nav_DW.NavState_Memory_PreviousInput.quat_nb[3]) * 2.0, 1.0 - ((real_T)
     nav_DW.NavState_Memory_PreviousInput.quat_nb[3] *
-    nav_DW.NavState_Memory_PreviousInput.quat_nb[3] + n_meas) * 2.0);
+    nav_DW.NavState_Memory_PreviousInput.quat_nb[3] + dt_meas) * 2.0);
   nav_Y.nav_out.alt_agl_m = (real32_T)-(real_T)
     nav_DW.NavState_Memory_PreviousInput.pos_ned[2];
   nav_Y.nav_out.imu_blend_w = nav_DW.NavState_Memory_PreviousInput.imu_blend_w;
@@ -2184,6 +2285,11 @@ void nav_step(void)
   nav_Y.nav_out.gnss_only = nav_DW.NavState_Memory_PreviousInput.gnss_only;
   nav_Y.nav_out.timestamp_s = nav_DW.NavState_Memory_PreviousInput.timestamp_s;
   nav_Y.nav_out.nav_valid = nav_DW.NavState_Memory_PreviousInput.init_done;
+  nav_Y.nav_out.nav_ready = (uint8_T)
+    ((nav_DW.NavState_Memory_PreviousInput.align_ok == 1) &&
+     (nav_DW.NavState_Memory_PreviousInput.baro_ref_set == 1) &&
+     (nav_DW.NavState_Memory_PreviousInput.origin_set == 1));
+  nav_Y.nav_out.nav_init_flags = flags;
 }
 
 /* Model initialize function */

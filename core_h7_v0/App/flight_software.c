@@ -165,7 +165,7 @@ int main(void) {
      * ángulo de rampa mal, siempre 0). La aviónica sigue sabiendo calibrar,
      * pero sin la orden manda las IMU en bruto. Ver PENDIENTES. */
 
-    /* GNC (navegación, máquina de estados y guiado). Se ejecuta a 400 Hz desde
+    /* GNC (navegación, máquina de estados y guiado). Se ejecuta a 416 Hz desde
      * el bucle, con las medias de los sensores que hayan llegado por CAN2. */
     /* La rampa guardada (ángulo y rumbo), en el convenio del GNC: ver
      * gnc_set_rampa(). Antes de gnc_init(), que es quien la aplica. */
@@ -258,7 +258,7 @@ int main(void) {
      * Va aqui, en el sitio de los sensores y antes del GNC. No hace nada si
      * no se simula. Lo que viene detras es el MISMO codigo en vuelo y
      * simulando: ninguna de esas funciones sabe si se esta simulando. */
-    /* ---- GNC a 400 Hz, guiado a 50 Hz (simulando, un tick por registro:
+    /* ---- GNC a 416 Hz, guiado a 52 Hz (simulando, un tick por registro:
      * ver gnc.h). Reiniciado en vuelo, en su sitio va el modo de emergencia,
      * que da los mismos datos con el barómetro (emergencia.h); tras un
      * vuelo, nada. ---- */

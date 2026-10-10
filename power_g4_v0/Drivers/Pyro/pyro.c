@@ -105,6 +105,20 @@ void AllPyroCheck(void)
     Pyro2B_OFF();
 }
 
+void PyroPruebaSinCan(void)
+{
+    Pyro1_ON();   // 7 V del par 1 (1A y 1B)
+    Pyro2_ON();   // 7 V del par 2 (2A y 2B)
+    Pyro1A_ON();
+    Pyro1B_ON();
+    Pyro2A_ON();
+    Pyro2B_ON();
+    for (;;)
+    {
+        // Nada mas: se quedan encendidos hasta quitar la corriente
+    }
+}
+
 bool Pyro1A_Continuity(void)
 {
     return (HAL_GPIO_ReadPin(PYRO1A_CONTINUITY_GPIO_PORT, PYRO1A_CONTINUITY_GPIO_PIN) == GPIO_PIN_SET);

@@ -279,7 +279,7 @@ class PaqueteEstado(object):
         "camaras",
         # Version 6: reinicio en vuelo (App/emergencia.h)
         "postvuelo", "emergencia", "emer_apogeo", "emer_main",
-        "baro_no_fiable",
+        "baro_no_fiable", "nav_init", "nav_listo",
     )
 
     @property
@@ -404,7 +404,29 @@ def decodificar_estado(b):
     p.emer_apogeo = v6 and bool(b[31] & 0x20)
     p.emer_main = v6 and bool(b[31] & 0x40)
     p.baro_no_fiable = v6 and bool(b[31] & 0x80)
+
+    # Version 7 (GNC v1.6): nav_init_flags, lo que tiene el filtro de la
+    # rampa. None con un cohete anterior: no se sabe.
+    if p.version >= 7:
+        p.nav_init = ((0x01 if b[24] & 0x40 else 0) |
+                      (0x02 if b[24] & 0x80 else 0) |
+                      (0x04 if b[25] & 0x40 else 0) |
+                      (0x08 if b[25] & 0x80 else 0))
+        # Listo para volar: las tres referencias (alineado, 0 AGL, origen
+        # GNSS). Es lo que hay que ver antes de armar el iniciador.
+        p.nav_listo = (p.nav_init & 0x07) == 0x07
+    else:
+        p.nav_init = None
+        p.nav_listo = None
     return p
+
+
+NAV_INIT_FALTA = ((0x01, "ALINEADO"), (0x02, "0 AGL"), (0x04, "GNSS"))
+
+
+def nav_init_falta(flags):
+    """Lo que le falta al GNC para estar listo, para pintarlo."""
+    return [n for b, n in NAV_INIT_FALTA if not (flags & b)]
 
 
 # === Acuse (App/uplink.h) =================================================

@@ -504,6 +504,24 @@ static void _section_gnc(void) {
     (double)g->alt_agl_m, g->pyro_armed ? C_WARN "   PIRO ARMADA" C_RESET : "",
     g->gnss_only ? "   solo GNSS" : "");
 
+  /* v1.6: listo para volar = las tres referencias de la rampa. Es lo que
+   * hay que mirar antes de armar el iniciador (nav_valid NO vale: es 1
+   * tambien navegando degradado). */
+  {
+    const uint8_t f = g->nav_init_flags;
+    P("   LISTO PARA VOLAR %s   alineado %s  0 AGL %s  origen GNSS %s%s"
+      "   palabra 0x%08lX\r\n",
+      g->nav_ready ? C_OK "SI" C_RESET : C_WARN "NO" C_RESET,
+      _flag((f & GNC_NAV_INIT_ALINEADO) != 0U),
+      _flag((f & GNC_NAV_INIT_BARO) != 0U),
+      _flag((f & GNC_NAV_INIT_GNSS) != 0U),
+      ((f & GNC_NAV_INIT_GNSS) == 0U) ? C_DIM " (sin fix)" C_RESET : "",
+      (unsigned long)g->status_word);
+    if ((f & GNC_NAV_INIT_DEGRADADO) != 0U) {
+      P(C_BAD "   NAVEGANDO SIN HABER ALINEADO (degradado)" C_RESET "\r\n");
+    }
+  }
+
   P("   Posicion NED [m]  ");
   _xyz(g->pos_ned_m, 2);
   P("\r\n   Velocidad  [m/s]  ");
@@ -566,12 +584,13 @@ static void _section_gnc(void) {
     (double)g->apogee_pred_m, (double)g->apogee_error_m,
     (double)(g->actuator_cmd * 100.0f));
 
-  P("   %lu ticks a 400 Hz (%lu de guiado), ultimo %lu us, max %lu us"
+  P("   %lu ticks a %u Hz (%lu de guiado), ultimo %lu us, max %lu us"
     " (%lu con guiado)%s\r\n",
-    (unsigned long)g->steps, (unsigned long)g->gc_steps,
+    (unsigned long)g->steps, (unsigned)GNC_RATE_HZ,
+    (unsigned long)g->gc_steps,
     (unsigned long)g->last_step_us, (unsigned long)g->max_step_us,
     (unsigned long)g->max_gc_step_us,
-    (g->max_step_us >= GNC_PERIOD_US) ? C_BAD "  NO CABE EN 2,5 ms" C_RESET
+    (g->max_step_us >= GNC_PERIOD_US) ? C_BAD "  NO CABE EN UN TICK" C_RESET
                                       : "");
   P("   %sticks perdidos %lu%s, recuperados %lu   IMU1 sin dato nuevo en"
     " %lu%% de los ticks   %sIMU caida: %lu + %lu ticks%s   baro %lu\r\n",

@@ -16,10 +16,11 @@
 #define PLAYBACK_FILE "VUELO.BIN"
 #define PLAYBACK_LOG "VUELOLOG.CSV"
 #define PLAYBACK_SUMMARY "VUELORES.TXT"
-#define PLAYBACK_MAGIC "LEEMVL12" /* formato de VUELO.BIN: 400 Hz */
+#define PLAYBACK_MAGIC "LEEMVL12" /* formato de VUELO.BIN: un registro por
+                                     tick del GNC (416 Hz con la v1.6) */
 
 /*
- * La rampa del vuelo grabado: el dataset de la entrega v1.5 se generó con los
+ * La rampa del vuelo grabado: el dataset de la entrega v1.6 (como la v1.5) se generó con los
  * ajustables de fábrica (PIL_manifest.txt), elevación 84,5 grados (5,5 desde
  * la vertical) y azimut 0 (nav_tun en nav_data.c). (La v1.2 traía 84,5007.) Si
  * se alinea con otra (la de vuelo), el EKF arrastra esa diferencia como sesgo
@@ -39,7 +40,7 @@
 #define PASO_S (GNC_PERIOD_US * 1.0e-6)
 #define TICKS_POR_S (GNC_RATE_HZ)
 
-/* VUELOLOG.CSV: una fila cada esto (100 Hz). A 400 Hz serían 400 filas por
+/* VUELOLOG.CSV: una fila cada esto (104 Hz). A 416 Hz serían 416 filas por
  * segundo escribiéndose en la SD en mitad de la simulación. */
 #define LOG_CADA_TICKS 4U
 
@@ -71,7 +72,7 @@ typedef struct __attribute__((packed)) {
   uint8_t fix_type;  /* el del modelo: UBX, 3 = 3D */
   uint8_t satellites;
   uint8_t gps_valid; /* 1 = en este tick hay dato nuevo de GPS */
-  uint8_t cmd_id;    /* comando de telemetria (ni la v1.2 ni la v1.5 traen) */
+  uint8_t cmd_id;    /* comando de telemetria (ninguna entrega trae) */
   float cmd_param;
   uint8_t cmd_valid;
 } playback_rec_t;
@@ -313,7 +314,7 @@ static void _analizar(void) {
     s_result.steps_actuated++;
     s_result.apogee_pred_m = g->apogee_pred_m;
   }
-  if (g->actuator_cmd > 0.999f) {
+  if (g->actuator_cmd > (GNC_ACTUADOR_MAX - 0.001f)) {
     s_result.steps_saturated++;
   }
   const float altitude = -g->pos_ned_m[2];

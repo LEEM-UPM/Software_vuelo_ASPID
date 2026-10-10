@@ -18,7 +18,7 @@ Ordenador de vuelo (STM32H723).
 | `App/sys_rf.c` | Placa de RF: manda bytes para transmitir por radio (`sys_rf_transmit`) |
 | `App/rf_telemetry.c` | Telemetría por radio (paquetes binarios de vuelo, estado y cámaras, y acuses): 3 Hz en tierra hasta ver el lanzamiento, 15 Hz desde entonces |
 | `App/sensor_board.c` | Telemetría de la placa de sensores (CAN2) |
-| `App/gnc.c` | GNC v1.5: nav y máquina de estados a 400 Hz, guiado a 50 Hz; alimenta los modelos de `third_party/aspid_gnc` con los sensores de CAN2 (IMU, barómetro, GNSS). Se alinea con la rampa guardada (elevación y azimut; el alabeo lo mide y lo quita girando las medidas) y se realinea en tierra en cuanto cambia |
+| `App/gnc.c` | GNC v1.6: nav y máquina de estados a 416 Hz, guiado a 52 Hz; alimenta los modelos de `third_party/aspid_gnc` con los sensores de CAN2 (IMU, barómetro, GNSS). Se alinea con la rampa guardada (elevación y azimut; el alabeo lo mide y lo quita girando las medidas) y se realinea en tierra en cuanto cambia |
 | `App/debug_console.c` | Consola de debug por USB (puerto COM virtual): banner al arrancar e informe cada segundo |
 | `App/storage.c` | Archivos en las dos microSD (FileX standalone): montaje, leer/escribir/borrar, prueba al arrancar |
 | `App/aspid_data.c` | Registro de cada sesión en la SD1: carpeta `aspid_data_<fecha>` con la telemetría desde el arranque, el vuelo a 100 Hz y la trust curve a 400 Hz, escrito por DMA sin bloquear (ver abajo) |

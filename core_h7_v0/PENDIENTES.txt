@@ -8,6 +8,87 @@ Leyenda:  [ ] pendiente   [x] hecho
 Al terminar algo, marcarlo con [x] (o borrarlo) en el mismo commit.
 
 
+[ ] REVISAR !!! POWER: BOOT0 (PB8) ALTO A RATOS (visto 2026-10-09). Con la
+            prueba de pirotecnia grabada y verificada, la power arrancaba en
+            el BOOTLOADER DE ST (PC en 0x1FFF3xxx), tambien con reset por NRST.
+            Sus bytes de opcion toman BOOT0 del pin (nSWBOOT0 = 1), y PB8 leia
+            1 incluso con el pull-down interno puesto: algo de la placa lo
+            sube con fuerza. El firmware no usa PB8 (CAN en PA11/PA12 y
+            PB5/PB6, I2C en PA15/PB7). Antes y despues (2026-10-10, al volver
+            a grabar el de vuelo) arranco bien: es intermitente. En vuelo,
+            cualquier reinicio (watchdog, caida de tension) con BOOT0 alto
+            deja la power muerta en el bootloader, sin pirotecnia.
+            Mirar en la placa: puente/pulsador de BOOT0, el conector de
+            programacion, o un puente de estano con PB7 (I2C1 SDA, con
+            pull-up). Y, en cualquier caso, poner nSWBOOT0 = 0 (con nBOOT0 =
+            1 arranca siempre de la flash e ignora el pin):
+              STM32_Programmer_CLI -c port=SWD -ob nSWBOOT0=0
+            Mirar lo mismo en avionica y RF (mismo micro). PENDIENTE DE QUE EL
+            USUARIO DECIDA.
+[x] IMPL    POWER: PRUEBA DE PIROTECNIA SIN CAN (2026-10-09). PYRO_PRUEBA_SIN_CAN
+            (pyro.h, a 0): al arrancar enciende los dos pares y los cuatro
+            canales y los deja asi, sin CAN. Se compila aparte en
+            build/PruebaPiros (ver pyro.h). Grabada y comprobada (las seis
+            salidas en alto, leidas por el ST-Link); el 2026-10-10 se volvio a
+            grabar el firmware de vuelo (build/Debug).
+
+[x] IMPL    GNC v1.6 INTEGRADO (2026-10-11, entrega del 2026-10-10). 416 Hz y
+            guiado a 52 Hz; nuevas entradas (error_code, nav_init_flags,
+            gnss_only, restore a 0) y salidas (nav_ready, nav_init_flags,
+            status_word). Aerofreno: el mando del GNC es despliegue 0..0,90 y
+            se pasa a nuestra extension (que ya empieza a ras de piel) / 0,90;
+            y se deja pasar en CUALQUIER estado (barrido al alinear, todo
+            fuera en ERROR tras volar). nav_ready en consola, SD (nav_listo,
+            palabra_gnc) y paquete de estado v7 (lampara LISTO VUELO en la
+            estacion). Registro de la SD por tiempo (100 Hz exactos).
+            PIL en el PC: 76487 filas, 0 discrepancias. En placa: 416
+            ticks/s, peor tick 1,15 ms de 2,4, alineado y 0 AGL; sin GPS,
+            nav_ready = 0 (flags 3), como dice la entrega.
+[ ] PROBAR  GNC v1.6: ver el BARRIDO del aerofreno al alinear (con el servo
+            conectado: sale todo fuera y vuelve a ras, ~0,6 s, una vez por
+            encendido) y nav_ready con fix de GPS al aire libre.
+[x] PROBAR  GNC v1.6: banco PIL en la placa (2026-10-11). RESULTADO:
+            CORRECTO (nav, state_machine y gc, 76487/9561 pasos, 0
+            discrepancias). Primero dio 751 discrepancias, solo en reales del
+            guiado: a -O2 el GCC junta mult+suma en FMA, que redondea
+            distinto. Arreglado compilando GNC, gnc.c y aspid_data.c con
+            -ffp-contract=off (CMakeLists.txt). Despues se volvio a grabar el
+            firmware de vuelo (build/Debug) y corre a 416 ticks/s.
+[ ] PROBAR  GNC v1.6: SIMULAR RUTA con el VUELO.BIN de la v1.6 (183,9 s,
+            tools/vuelo_from_pil.py).
+[ ] REVISAR GNC v1.6: en el banco PIL el PEOR TICK de los tres modelos fue
+            3,58 ms con 2,40 ms de presupuesto (en vuelo normal se midio
+            1,15 ms). El planificador recupera ticks atrasados, pero si se
+            repite en vuelo real se pierde tiempo real. Ver en que paso del
+            vuelo ocurre (probablemente el guiado de 52 Hz coincidiendo con
+            nav) y, si hace falta, decirselo a GNC.
+[ ] DECIDIR GNC v1.6: el aerofreno se mueve en la rampa (barrido al alinear).
+            Lo pide la entrega. Avisar a quien este junto al cohete.
+[ ] DECIDIR GNC v1.6 trae "restore" para reinyectar modo y fase tras un
+            reinicio; no se usa (valid = 0): reiniciada en el aire, la core va
+            al modo de emergencia (solo barometro). Si GNC prefiere lo suyo,
+            habra que verlo con ellos (el filtro no se alinea volando).
+[ ] INFORMAR A GNC (v1.6): (1) rt_powd_snf sigue duplicada; (2) el mapa
+            del aerofreno se hace con la cinematica real (biela-manivela del
+            PDF, 31,49 mm, 109 grados) y no con su acos de 90 grados y 40 mm,
+            con los mismos extremos; (3) restore no se usa; (4) el codigo
+            generado da otros resultados con FMA (-ffp-contract): en ARM hay
+            que compilarlo con -ffp-contract=off para que cuadre con su PIL;
+            (5) peor tick 3,58 ms en el PIL, por encima de los 2,40 ms.
+
+[x] IMPL    ESTACION: DATOS DEL CATS (2026-10-10, pedido por el usuario).
+            tools/estacion/cats.py lee la estacion de tierra de CATS (ESP32-S2
+            por USB, se busca sola; --cats COMx) y la boton DATOS cambia entre
+            lo nuestro y lo de CATS en lo que se solapa: altura, velocidad
+            vertical, fase y recorrido (en rosa y marcado CATS). Guardado en
+            cats/cats.csv. Formato sacado del firmware de CATS
+            (cats-embedded, Utils::streamUsb), con su forma rara de imprimir
+            negativos. Probado en modo demo con un CATS fingido.
+[ ] PROBAR  CATS DE VERDAD: enchufar su estacion de tierra, ver que se
+            encuentra sola (--listar la marca) y que llegan las lineas. Mirar
+            que su altura es sobre el suelo como la nuestra, y la escala del
+            mapa con los dos.
+
 [x] ARREGLO !!! MEMORIA DE VUELO LLENA EN SEGUNDOS (visto 2026-10-07). Sintoma:
             la core arrancaba en POSTVUELO (sin GNC: "nav --", 0 muestras por
             tick, como si no llegara la avionica) y pitando, con la flash

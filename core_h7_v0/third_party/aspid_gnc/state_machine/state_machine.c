@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'state_machine'.
  *
- * Model version                  : 3.20
+ * Model version                  : 3.46
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Tue Oct  6 00:35:58 2026
+ * C/C++ source code generated on : Sat Oct 10 20:59:58 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -54,6 +54,7 @@ void state_machine_step(void)
   int32_T new_state;
   int32_T rtb_sm_state_out_prev_state;
   int32_T rtb_sm_state_out_state;
+  int32_T state;
   uint16_T rtb_sm_state_out_err_cnt;
   uint16_T rtb_sm_state_out_launch_cnt;
   uint16_T rtb_sm_state_out_stall_cnt;
@@ -63,6 +64,7 @@ void state_machine_step(void)
   uint8_T rtb_sm_state_out_error_code;
   uint8_T rtb_sm_state_out_init_done;
   uint8_T rtb_sm_state_out_nav_ever_ok;
+  uint8_T rtb_sm_state_out_restore_done;
   boolean_T c[3];
   boolean_T d[3];
   boolean_T exitg2;
@@ -91,6 +93,8 @@ void state_machine_step(void)
   t_in_state = state_machine_DW.SMState_Memory_PreviousInput.t_prev_s;
   rtb_sm_state_out_init_done =
     state_machine_DW.SMState_Memory_PreviousInput.init_done;
+  rtb_sm_state_out_restore_done =
+    state_machine_DW.SMState_Memory_PreviousInput.restore_done;
   if (state_machine_DW.SMState_Memory_PreviousInput.init_done == 0) {
     rtb_sm_state_out_state = 0;
     rtb_sm_state_out_prev_state = 0;
@@ -104,7 +108,25 @@ void state_machine_step(void)
     rtb_sm_state_out_init_done = 1U;
   }
 
+  state = rtb_sm_state_out_state;
   new_state = rtb_sm_state_out_state;
+  if ((state_machine_U.sm_in.restore.valid == 1) &&
+      (state_machine_DW.SMState_Memory_PreviousInput.restore_done == 0) &&
+      (state_machine_U.sm_in.timestamp_s <= 2.0) &&
+      (state_machine_U.sm_in.restore.rocket_state >= 0) &&
+      (state_machine_U.sm_in.restore.rocket_state <= 3)) {
+    state = state_machine_U.sm_in.restore.rocket_state;
+    new_state = state_machine_U.sm_in.restore.rocket_state;
+    rtb_sm_state_out_state = state_machine_U.sm_in.restore.rocket_state;
+    rtb_sm_state_out_prev_state = state_machine_U.sm_in.restore.rocket_state;
+    rtb_sm_state_out_t_entry_s = state_machine_U.sm_in.timestamp_s;
+    rtb_sm_state_out_init_done = 1U;
+    rtb_sm_state_out_restore_done = 1U;
+    if (state_machine_U.sm_in.restore.rocket_state == 2) {
+      rtb_sm_state_out_nav_ever_ok = 1U;
+    }
+  }
+
   scale = 3.3121686421112381E-170;
   x_tmp[0] = state_machine_U.sm_in.accel_body[0];
   absxk = fabs(state_machine_U.sm_in.accel_body[0]);
@@ -246,13 +268,13 @@ void state_machine_step(void)
   fault_code = 0U;
   if (!y) {
     fault_code = 3U;
-  } else if (rtb_sm_state_out_stall_cnt >= 200) {
+  } else if (rtb_sm_state_out_stall_cnt >= 208) {
     fault_code = 2U;
   } else {
     if (rtb_sm_state_out_nav_ever_ok == 1) {
-      tmp = 400U;
+      tmp = 416U;
     } else {
-      tmp = 24000U;
+      tmp = 24960U;
     }
 
     if (rtb_sm_state_out_err_cnt >= tmp) {
@@ -269,9 +291,9 @@ void state_machine_step(void)
   }
 
   t_in_state = state_machine_U.sm_in.timestamp_s - rtb_sm_state_out_t_entry_s;
-  switch (rtb_sm_state_out_state) {
+  switch (state) {
    case 0:
-    if (rtb_sm_state_out_launch_cnt >= 24) {
+    if (rtb_sm_state_out_launch_cnt >= 25) {
       new_state = 2;
     } else if (cmd == 255) {
       new_state = 3;
@@ -300,7 +322,7 @@ void state_machine_step(void)
     break;
 
    case 3:
-    if (rtb_sm_state_out_launch_cnt >= 24) {
+    if (rtb_sm_state_out_launch_cnt >= 25) {
       new_state = 2;
     } else if (cmd == 3) {
       new_state = 0;
@@ -316,8 +338,8 @@ void state_machine_step(void)
     break;
   }
 
-  if (new_state != rtb_sm_state_out_state) {
-    rtb_sm_state_out_prev_state = rtb_sm_state_out_state;
+  if (new_state != state) {
+    rtb_sm_state_out_prev_state = state;
     rtb_sm_state_out_state = new_state;
     rtb_sm_state_out_t_entry_s = state_machine_U.sm_in.timestamp_s;
     rtb_sm_state_out_launch_cnt = 0U;
@@ -373,6 +395,8 @@ void state_machine_step(void)
     state_machine_U.sm_in.timestamp_s;
   state_machine_DW.SMState_Memory_PreviousInput.init_done =
     rtb_sm_state_out_init_done;
+  state_machine_DW.SMState_Memory_PreviousInput.restore_done =
+    rtb_sm_state_out_restore_done;
 }
 
 /* Model initialize function */

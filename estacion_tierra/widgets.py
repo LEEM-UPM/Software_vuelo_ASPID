@@ -20,8 +20,11 @@ import tkinter.font as tkfont
 
 FONDO = "#000000"
 VERDE = "#00ff5a"        # dato vivo, lo que hay que leer
-VERDE_MED = "#00b843"    # etiquetas
-VERDE_OSC = "#00702a"    # marcos
+VERDE_MED = "#00d24e"    # etiquetas
+# Marcos, y tambien mucho texto pequeño (pies, unidades, lo apagado). Era
+# #00702a y no se leia bien (2026-10-10): mas claro, sigue por debajo de
+# VERDE_MED para que se note que es secundario.
+VERDE_OSC = "#00a33d"
 REJILLA = "#00381a"      # rejillas y guías
 APAGADO = "#0c2113"      # lámpara apagada, segmento vacío
 AMBAR = "#ccff00"
@@ -29,6 +32,30 @@ CIAN = "#00ffd5"
 MAGENTA = "#ff2fa0"
 ROJO = "#ff3b30"
 AZUL = "#3ba0ff"
+# Solo decorativo (acento de los paneles de sistema): no significa nada
+VIOLETA = "#a37bff"
+
+# Acento de cada panel, por familias: se pinta en las esquinas y en la
+# marca del titulo. Es decoracion que ademas agrupa, pero NO es un dato:
+# por eso no se usan ROJO ni AMBAR (alarma y aviso) ni MAGENTA (datos de
+# CATS).
+ACENTOS = {
+    # vuelo
+    "MEDIDORES": VERDE, "PERFIL DE ALTURA": VERDE,
+    "VELOCIDAD VERTICAL": VERDE, "FASE DE VUELO": VERDE, "VUELO": VERDE,
+    # navegacion
+    "ACTITUD": AZUL, "RECORRIDO": AZUL, "ACELERACION": AZUL,
+    # radio
+    "ENLACE": CIAN, "PAQUETE CRUDO": CIAN, "RANURAS RESERVADAS": CIAN,
+    # sistema
+    "SISTEMA": VIOLETA, "SALUD": VIOLETA,
+}
+
+def atenuar(color, f):
+    """El mismo color, mas oscuro: f = 1 igual, f = 0 negro."""
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % (int(r * f), int(g * f), int(b * f))
+
 
 # --- Fuentes ----------------------------------------------------------------
 
@@ -49,7 +76,12 @@ def familia():
     return _FAMILIA
 
 
+# Nada por debajo de esto: en Consolas, 7 puntos no se lee bien en campo
+TAM_MINIMO = 8
+
+
 def fuente(tam, negrita=False):
+    tam = max(tam, TAM_MINIMO)
     return (familia(), tam, "bold") if negrita else (familia(), tam)
 
 
@@ -193,6 +225,11 @@ class Panel(tk.Canvas):
         tk.Canvas.__init__(self, padre, takefocus=0, **kw)
         self.titulo = titulo
         self.color_marco = color
+        self.acento = ACENTOS.get(titulo, VERDE_MED)
+        # El marco, del color de su familia pero apagado: agrupa sin quitarle
+        # protagonismo a los datos. Los paneles sin familia, como estaban.
+        if titulo in ACENTOS and color == VERDE_OSC:
+            self.color_marco = atenuar(self.acento, 0.45)
         self.estado = None
         self.w = int(kw.get("width", 120))
         self.h = int(kw.get("height", 80))
@@ -214,13 +251,21 @@ class Panel(tk.Canvas):
         d = 7
         for (ex, ey, dx, dy) in ((x0, y0, 1, 1), (x1, y0, -1, 1),
                                  (x0, y1, 1, -1), (x1, y1, -1, -1)):
-            self.create_line(ex, ey, ex + d * dx, ey, fill=VERDE_MED)
-            self.create_line(ex, ey, ex, ey + d * dy, fill=VERDE_MED)
+            self.create_line(ex, ey, ex + d * dx, ey, fill=self.acento)
+            self.create_line(ex, ey, ex, ey + d * dy, fill=self.acento)
         if self.titulo:
-            self.create_rectangle(9, 2, 13 + 6.2 * len(self.titulo), 13,
-                                  fill=FONDO, outline="")
-            self.create_text(11, 8, text=self.titulo, anchor="w",
+            fin = 20 + 6.2 * len(self.titulo)
+            self.create_rectangle(9, 2, fin + 4, 13, fill=FONDO, outline="")
+            # Marca de color antes del titulo
+            self.create_rectangle(11, 4, 15, 12, fill=self.acento,
+                                  outline="")
+            self.create_text(19, 8, text=self.titulo, anchor="w",
                              fill=VERDE_MED, font=fuente(8, True))
+            # Tres puntos de "instrumento" arriba a la derecha
+            for k in range(3):
+                x = self.w - 14 - k * 6
+                self.create_rectangle(x, 0, x + 2, 2, fill=self.acento,
+                                      outline="")
 
     def refrescar(self, estado=None):
         if estado is not None:

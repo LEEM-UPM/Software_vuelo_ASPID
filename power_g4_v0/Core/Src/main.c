@@ -120,6 +120,11 @@ int main(void)
   MX_ADC4_Init();
   /* USER CODE BEGIN 2 */
 
+#if PYRO_PRUEBA_SIN_CAN
+#warning "PYRO_PRUEBA_SIN_CAN: los cuatro pirotecnicos se encienden al arrancar y se quedan asi. SOLO EN EL BANCO Y SIN CARGAS (pyro.h)"
+  PyroPruebaSinCan(); // no vuelve: ni CAN, ni nada mas (pyro.h)
+#endif
+
   Sys_init();
 
   while(!CanNode_PollWakeUp()) { // espera a que le llegue el wake up

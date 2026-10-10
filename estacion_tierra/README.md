@@ -11,6 +11,8 @@ python estacion.py --demo-emergencia  la core "se reinicia" a los 20 s de vuelo
 python estacion.py --listar        enumera los puertos serie y sale
 python estacion.py --sin-guardar   no guarda nada en disco (para pruebas)
 python estacion.py --carpeta-datos RUTA   guarda ahí en vez de en el escritorio
+python estacion.py --cats COM12    fuerza el puerto de la estación de CATS
+python estacion.py --sin-cats      no lee CATS
 ```
 
 **Todo lo que llega se guarda** en `Escritorio/LEEM_datos/<fecha_hora>/`,
@@ -99,11 +101,21 @@ Escritorio/LEEM_datos/2026-10-04_17-30-12/      (_DEMO si es --demo)
 | `paneles.py` | cada recuadro de la pantalla |
 | `estacion.py` | el estado compartido, la distribución y el bucle |
 | `grabador.py` | guarda en disco todo lo que llega, ordenado por tipo |
+| `cats.py` | lee la estación de tierra de CATS (el otro ordenador de vuelo) |
 
 La separación no es capricho: **toda la interpretación del paquete está en
 `paquete.py` y toda la acumulación en `Estado`**. Los paneles sólo presentan.
 En cuanto un panel empieza a hacer cuentas, ese cálculo acaba duplicado en
 otro sitio y los dos se separan sin que nadie se entere.
+
+## Colores
+
+Los **datos** usan los colores con significado: verde lo normal, ámbar aviso,
+rojo alarma, rosa lo que viene de CATS. Los **marcos** de los paneles van por
+familias, solo para agrupar (`widgets.ACENTOS`): verde vuelo, azul
+navegación, cian radio, violeta sistema. La decoración nunca usa rojo, ámbar
+ni rosa, para que no se confunda con un aviso. Un panel nuevo se pone en su
+familia añadiendo su título a `ACENTOS`.
 
 ## Cómo añadir cosas
 
@@ -185,6 +197,51 @@ Los comandos con parámetro de 16 bits van en un formato de 5 bytes:
 formato que toca.
 
 ARMAR, DESARMAR y ABORTAR siguen dibujados y apagados hasta que existan allí.
+
+## CATS
+
+El cohete lleva además un **CATS Vega** ([catsystems.io](https://catsystems.io)),
+un ordenador de vuelo comercial con su propia radio (2,4 GHz) y su propia
+estación de tierra. Esa estación se enchufa al PC por USB y la interfaz la
+lee a la vez que nuestro puente (`cats.py`).
+
+**Conexión.** Se busca sola: es un ESP32-S2 (USB de Espressif, VID 0x303A).
+Si no la encuentra lo dice en el registro y sigue sin ella; `--cats COMx` la
+fuerza. Es un puerto USB CDC: la velocidad da igual, **pero no abrirlo nunca a
+1200 baudios**, que la reinicia en su bootloader. La búsqueda del puente
+nunca coge el puerto de CATS.
+
+**Qué manda.** Una línea de texto por paquete recibido (firmware
+`cats-embedded`, `Utils::streamUsb`):
+
+```
+Link 1: Ts: 12.3, State: 3, Lat: 47.12345, Lon: 8.12345, Alt: 512, Vel: 87, V: 8.1
+```
+
+link del receptor, tiempo del CATS, estado (INVALID, CALIBRATING, READY,
+THRUSTING, COASTING, DROGUE, MAIN, TOUCHDOWN), latitud y longitud, altura y
+velocidad vertical **enteras** y su batería. Ojo con los negativos: el
+firmware imprime la parte entera y los decimales por separado, así que
+-3,73 sale `-3.-73000` (y -0,0007, `0.-0070`); `cats.py` lo junta bien.
+
+**Botón DATOS.** Cambia de quién se pintan los datos que tienen los dos:
+altura, velocidad vertical, fase y recorrido (los medidores ALT y VEL, los
+paneles de perfil, velocidad, fase, VUELO y RECORRIDO). Con CATS se ven en
+rosa y con la marca **CATS** en cada panel, para que no se confundan con los
+nuestros. Todo lo demás (actitud, aerofreno, salud, enlace, la batería del
+cohete) sigue siendo nuestro. Si CATS lleva más de 3 s sin mandar, el botón
+dice `CATS (sin datos)`.
+
+- **Fases:** THRUSTING es BOOST, COASTING es COAST y DROGUE, MAIN y
+  TOUCHDOWN coinciden. CATS no distingue el control del aerofreno ni el
+  apogeo.
+- **Recorrido:** CATS da latitud y longitud, y el nuestro va en metros desde
+  donde se alineó el GNC. El de CATS se pasa a metros desde su primer fix de
+  GPS.
+
+Todo lo que llega queda en `cats/cats.csv`, con la línea original. Los
+cambios de estado de CATS salen en el registro. En `--demo` hay un CATS
+fingido (10 Hz, con su propio error de altura) para probar el botón.
 
 ## Cerrojo de la rampa
 

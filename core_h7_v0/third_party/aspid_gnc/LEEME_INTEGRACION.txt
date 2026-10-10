@@ -1,5 +1,5 @@
 GNC LEEM - codigo generado para STM32H7 (Cortex-M7)
-Version 1_5, generado 2026-10-06 00:36
+Version 1_6, generado 2026-10-10 21:00
 Embedded Coder, ert.tlc, ARM Compatible->ARM Cortex-M, solo generacion.
 La compilacion cruzada se hace en STM32CubeIDE / arm-none-eabi-gcc.
 
@@ -20,7 +20,7 @@ PLANIFICACION
 Al arrancar, una vez:
   nav_initialize();  state_machine_initialize();  gc_initialize();
 
-Temporizador a 400 Hz (2.500 ms). En cada tick:
+Temporizador a 416 Hz (2.404 ms). En cada tick:
   1) rellenar nav_U con las dos IMU, el baro y el GNSS
      data_valid = 1 SOLO en el tick en que llega dato nuevo de ese sensor.
      Con un nivel fijo a 1 el filtro inyecta la misma medida muchas veces y
@@ -29,14 +29,14 @@ Temporizador a 400 Hz (2.500 ms). En cada tick:
   3) rellenar state_machine_U con nav_Y y la telemetria
   4) state_machine_step()
 
-Cada 8 ticks (50 Hz):
+Cada 8 ticks (52 Hz):
   5) rellenar gc_U con nav_Y y state_machine_Y
      COPIA COMPLETA de una vez: el guiado tiene que ver todos los campos
      del MISMO ciclo. Mezclar posicion de un ciclo con velocidad del
      siguiente son decimas de m/s de incoherencia en pleno boost, y el
      propagador de apogeo predice entonces una trayectoria que no existe.
   6) gc_step()
-  7) gc_Y.actuator_cmd [0..1] -> servo del aerofreno
+  7) gc_Y.actuator_cmd -> servo del aerofreno (ver la seccion del servo)
      gc_Y.drogue_deploy_flag / main_deploy_flag -> canales pirotecnicos
      Son PULSOS acotados, no niveles: pasarlos tal cual al canal.
 
@@ -46,17 +46,214 @@ la simulacion. Alimentarlo con el del mismo ciclo no se puede: cada uno
 necesita la salida del otro.
 
 --------------------------------------------------------------------
+SERVO DEL AEROFRENO: EL MANDO NO VA DIRECTO AL PWM
+--------------------------------------------------------------------
+gc_Y.actuator_cmd es DESPLIEGUE AERODINAMICO, de 0 a 0.90, no recorrido
+de servo. Entre los dos hay una conversion que el firmware TIENE que hacer:
+
+    recorrido = actuator_cmd + 0.1000        (recorrido muerto)
+    angulo    = acos(recorrido)            [rad, 0 = abierto]
+    pulso_us  = 1500 + (angulo/(pi/2))*K   (K segun el montaje del servo)
+
+POR QUE EL SUMANDO. La paleta del aerofreno esta 4 mm METIDA dentro del
+fuselaje con el mecanismo en su cero, o sea que el primer 10 % del
+recorrido se gasta solo en que la paleta llegue a ras de piel, sin ningun
+efecto aerodinamico. El guiado pide despliegue de verdad y el driver pone
+ese sesgo; si se manda actuator_cmd al servo tal cual, el primer 10 % del
+mando no hace nada y el lazo interno lo ve como un retardo puro, que es lo
+peor que se le puede dar a un PI.
+
+POR QUE EL TOPE ES 0.90 Y NO 1. El recorrido del mecanismo es fijo (la
+manivela barre 90 grados), asi que gastar 4 mm en salir a ras de piel
+deja el despliegue maximo en el 90 % del nominal de diseno. El guiado ya
+lo sabe y no pide mas; el firmware no tiene que recortar nada, pero si debe
+comprobar que su mapa de PWM llega al tope mecanico cuando el mando vale
+0.90, porque esa es toda la autoridad que tiene el cohete.
+
+EL ACOS NO ES OPCIONAL: el mecanismo es biela-manivela y la relacion entre
+angulo de servo y extension de paleta es un coseno, no una recta. Sin el,
+el despliegue que sale no es el que pidio el guiado salvo en los extremos.
+
+--------------------------------------------------------------------
+AEROFRENO AL MAXIMO SI HAY FALLO EN VUELO
+--------------------------------------------------------------------
+El guiado abre el aerofreno a su tope (0.90) cuando detecta fallo, y lo
+hace saliendo por actuator_cmd como cualquier otro mando: el firmware no
+tiene que implementar nada aparte. Las dos formas de entrar son:
+
+  rocket_state = AIRBORNE y error_code distinto de 0
+  rocket_state = ERROR (3), habiendo volado
+
+Es la razon por la que gc_U lleva state_machine_Y.error_code: en vuelo la
+maquina de estados NO cambia de modo al detectar un fallo (ST_AIRBORNE es
+terminal, irse a ERROR dejaria al cohete sin secuencia de recuperacion), o
+sea que el fallo en vuelo solo se ve en error_code.
+
+NO SE ABRE si el drogue ya salio: un aerofreno abierto con el paracaidas
+fuera es un enganche de cuerdas, y bajo drogue el cohete va a 25 m/s y lo
+que el freno pueda anadir es despreciable.
+
+Y NO se abre con el cohete en tierra en ERROR (un FORCE_ERROR de banco, por
+ejemplo): el enclavamiento exige haber superado 100 m de verdad.
+
+--------------------------------------------------------------------
+ARRANQUE: ALINEAR EL FILTRO ANTES DE ARMAR EL INICIADOR
+--------------------------------------------------------------------
+El MQEKF se alinea solo, promediando 832 muestras con el cohete QUIETO
+(2000 ms a 416 Hz). De ese promedio salen la actitud inicial, la referencia
+barometrica y el sesgo del acelerometro.
+
+SI EL MOTOR ARRANCA ANTES DE QUE TERMINE, EL GNC NO FUNCIONA. No se
+degrada: el filtro promedia aceleracion de vuelo y toma por gravedad lo que
+es empuje. Medido en simulacion, encendiendo en t = 0 frente a t = 1 s:
+
+    encendido    apogeo    mando max    error de nav en la ventana
+      t = 0      2478 m      0.000              342 m
+      t = 1 s    3015 m      0.900                9 m
+
+Y el apogeo de 2478 m no es "frena de mas": con la navegacion asi, la
+deteccion de apogeo se adelanta y el drogue sale ANTES del apogeo, con el
+cohete subiendo.
+
+SECUENCIA: alimentar la avionica, ESPERAR a que nav_Y.nav_ready valga 1, y
+solo entonces armar el iniciador.
+
+--------------------------------------------------------------------
+TELEMETRIA EN RAMPA: EL FILTRO ESTA LISTO?
+--------------------------------------------------------------------
+Bajar por telemetria estos dos campos de nav_Y con el cohete en la guia:
+
+  nav_ready       1 = listo para volar (las tres referencias de la rampa)
+  nav_init_flags  desglose, para saber que falta si nav_ready no llega a 1:
+                    bit 0 (1)  alineado completado: actitud y sesgos
+                    bit 1 (2)  referencia barometrica: el 0 AGL
+                    bit 2 (4)  origen GNSS: el (0,0,0) del NED
+                    bit 3 (8)  navegando SIN haber alineado (degradado)
+                  Listo es 7. Un 6 es "falta el alineado", o sea que alguien
+                  mueve el cohete o la IMU no esta quieta. Un 3 es "no hay
+                  fix GNSS": cielo tapado en la rampa.
+
+NO usar nav_valid para esto: vale 1 tambien navegando degradado, sin
+haber alineado.
+
+LAS TRES REFERENCIAS SE ENCLAVAN EN EL MISMO INSTANTE, al terminar el
+alineado (2 s con el cohete quieto): la posicion inercial se pone a
+cero, la presion media de la rampa pasa a ser el 0 AGL del barometro, y el
+promedio de los fixes recibidos pasa a ser el origen del GNSS. Asi los tres
+miden desde el mismo punto, y los errores absolutos del barometro (presion
+del dia) y del GNSS (sesgo del receptor) se cancelan en la resta.
+
+NAV_REALIGN desde tierra (solo en READY) rehace las tres.
+
+AL TERMINAR EL ALINEADO, el aerofreno hace un barrido rapido: se abre al
+tope y vuelve a ras (unos 0.6 s), una vez por encendido. Sale por
+actuator_cmd como cualquier otro mando: el firmware no hace nada aparte.
+Antes del barrido la paleta esta 4 mm dentro (cero mecanico); despues,
+a ras de piel, que es el "cerrado" de vuelo.
+
+--------------------------------------------------------------------
+TELEMETRIA: LA PALABRA DE ESTADO (gc_Y.status_word, uint32)
+--------------------------------------------------------------------
+Todos los estados del GNC en un solo entero, para bajarlo por telemetria y
+desempaquetarlo en tierra. Los enteros (fase, modo, codigo de fallo) ocupan
+un campo de varios bits; los si/no, un bit cada uno. NO lleva los flags de
+disparo de los paracaidas: esos activan la pirotecnia, no son un estado.
+
+  bits  0-2   fase de vuelo    0 IDLE 1 BOOST 2 COAST_UNCTRL 3 COAST_CTRL
+                               4 APOGEE 5 DROGUE 6 MAIN 7 LANDED
+  bits  3-4   modo de mision   0 READY 1 MAINTENANCE 2 AIRBORNE 3 ERROR
+  bits  5-7   codigo de fallo  0 ninguno 1 nav invalida 2 nav parada
+                               3 NaN en la nav 4 por telemetria
+  bit   8     alineado en rampa completado
+  bit   9     cero barometrico enclavado (0 AGL)
+  bit  10     origen GNSS enclavado (0,0,0 del NED)
+  bit  11     navegando SIN haber alineado (degradado)
+  bit  12     nav_ready: listo para armar el iniciador
+  bit  13     nav_valid: el filtro esta navegando
+  bit  14     GNSS fresco (ultimo fix hace menos de 1.0 s)
+  bit  15     modo solo-GNSS (tras el apogeo)
+  bit  16     pirotecnia armada (superados 100 m)
+  bit  17     apogeo detectado
+  bit  18     lazo de control del aerofreno cerrado
+  bit  19     aerofreno en mando manual (banco)
+  bit  20     propagador de apogeo valido, en control
+  bit  21     estado restaurado tras un reinicio de la avionica
+  bit  22     inhibicion del drogue activa (menos de 15 s de vuelo)
+  bit  23     aerofreno al maximo por fallo en vuelo
+  bit  24     barrido del aerofreno al encender, en curso
+  bit  25     vencido el tiempo maximo hasta el drogue (30 s): apogeo forzado
+  bits 26-31  reservados, a cero
+
+Desempaquetar, en C:
+
+    fase  =  w        & 0x7;
+    modo  = (w >> 3)  & 0x3;
+    fallo = (w >> 5)  & 0x7;
+    listo = (w >> 12) & 0x1;     /* y asi cada bit */
+
+En MATLAB, tools/decode_status(w) lo hace entero y lo imprime legible. El
+mapa esta en un solo sitio del GNC (empaquetar_estado, en
+guidance_control_logic) y test_gnc_algos comprueba que empaquetar y
+desempaquetar casan. Si los bits reservados llegan distintos de cero, el
+firmware tiene un mapa mas nuevo que el decodificador de tierra.
+
+--------------------------------------------------------------------
 SENSORES: ritmo y decimacion
 --------------------------------------------------------------------
-  IMU (WSEN-ISDS y LSM6DSV32X)   400 Hz, todos los ticks
-  Barometro (WSEN-PADS)          chip a 75 Hz de ODR, leer cada 6 ticks (66.7 Hz)
-  GNSS (MAX-M10S)                10 Hz, cada 40 ticks
+  IMU (WSEN-ISDS y LSM6DSV32X)   416 Hz, todos los ticks
+  Barometro (WSEN-PADS)          chip a 75 Hz de ODR, leer cada 6 ticks (69.3 Hz)
+  GNSS (MAX-M10S)                9.90476 Hz, cada 42 ticks
 
   El GNSS hay que configurarlo con dynModel = 8 ("Airborne <4g"), que es el
   modelo dinamico mas permisivo. Aun asi se caera durante todo el impulso,
   porque el cohete pasa de 4 g: eso esta previsto y la navegacion aguanta en
   inercial. Con el valor por defecto (Portable) se cae mucho antes y tarda
   mas en reengancharse.
+
+--------------------------------------------------------------------
+RECUPERACION TRAS REINICIO DE LA AVIONICA
+--------------------------------------------------------------------
+Si la placa se reinicia en vuelo, el GNC arranca de cero: la maquina de
+estados en READY y el guiado en IDLE. En el aire eso significa que no se
+dispara la recuperacion. El firmware guarda en SD el modo y la fase y los
+reinyecta al arrancar:
+
+    state_machine_U.sm_in.restore.valid        = 1
+    state_machine_U.sm_in.restore.rocket_state = <lo leido de la SD>
+    state_machine_U.sm_in.restore.flight_phase = <lo leido de la SD>
+    gc_U.gc_in.restore.<los mismos tres campos>
+
+TRES COSAS QUE HAY QUE RESPETAR
+
+  1) MANTENER valid A UNO AL MENOS 100 ms, NO un solo ciclo.
+     El guiado corre a 52 Hz y la maquina a 416, con una decimacion de 8
+     a 1. Un pulso de un ciclo de la tarea rapida se perderia 7 de cada
+     8 veces, y el sintoma seria el peor posible: la restauracion entra
+     en la maquina de estados y NO en el guiado, o sea modo AIRBORNE con
+     fase IDLE y sin recuperacion.
+
+  2) Bajar valid despues. Los modelos solo la atienden una vez y dentro de
+     los primeros segundos, pero dejarla a uno no aporta nada.
+
+  3) NO inventarse los valores. Si la SD no se puede leer o el registro
+     esta corrupto, dejar valid a CERO. Arrancar en READY es recuperable;
+     arrancar en una fase equivocada no: restaurar a DROGUE estando en
+     rampa dispara la pirotecnia en tierra.
+
+QUE HACE EL GNC CON ESO
+
+  Restaura modo y fase, y ademas RECONSTRUYE los enclavamientos que
+  habilitan los disparos y que el reinicio borro. Es lo que de verdad
+  importa: restaurar solo la fase dejaria al guiado creyendose en DROGUE
+  con la pirotecnia desarmada, y no dispararia nunca.
+
+  El retardo del drogue se cuenta desde el REINICIO, no desde el apogeo
+  real: tras reiniciar, el reloj arranca de cero y el instante guardado no
+  significa nada. El drogue sale por tanto algo mas tarde de lo nominal.
+
+  Si la fase restaurada es DROGUE o MAIN, ese canal se rearma y se vuelve
+  a pulsar. Puede que ya estuviera gastado: se prefiere gastar un segundo
+  de corriente a arriesgar un paracaidas que no haya salido.
 
 --------------------------------------------------------------------
 AJUSTABLES EN CAMPO
@@ -76,24 +273,27 @@ distinto del que uso el propagador en el ciclo anterior.
   gc_tun.min_ctrl_alt_agl_m     [m AGL] altura minima para abrir el aerofreno
   gc_tun.main_deploy_alt_agl_m  [m AGL] altura de apertura del paracaidas principal
   gc_tun.drogue_delay_s         [s    ] retardo del drogue tras el apogeo
+  gc_tun.drogue_inhibit_s       [s    ] tiempo minimo de vuelo antes de poder abrir el drogue
+  gc_tun.drogue_timeout_s       [s    ] tiempo maximo de vuelo: si no hay apogeo, se abre el drogue
+  gc_tun.deadband_m             [m    ] banda muerta sobre el error de apogeo
 
 --------------------------------------------------------------------
 INTERFAZ POR MODELO
 --------------------------------------------------------------------
 
-NAV  -  400 Hz  -  navegacion (INS + MQEKF de 15 estados)
+NAV  -  416 Hz  -  navegacion (INS + MQEKF de 15 estados)
     extern void nav_initialize(void);
     extern void nav_step(void);
     extern ExtU_nav_T nav_U;
     extern ExtY_nav_T nav_Y;
 
-STATE_MACHINE  -  400 Hz  -  maquina de estados de mision
+STATE_MACHINE  -  416 Hz  -  maquina de estados de mision
     extern void state_machine_initialize(void);
     extern void state_machine_step(void);
     extern ExtU_state_machine_T state_machine_U;
     extern ExtY_state_machine_T state_machine_Y;
 
-GC  -  50 Hz  -  guiado, control del aerofreno y pirotecnia
+GC  -  52 Hz  -  guiado, control del aerofreno y pirotecnia
     extern void gc_initialize(void);
     extern void gc_step(void);
     extern ExtU_gc_T gc_U;

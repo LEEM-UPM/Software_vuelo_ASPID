@@ -95,7 +95,7 @@ static float s_rampa_alabeo_rad;
  * alabeo, para medirlo mientras no se ha alineado (ver _quitar_alabeo) */
 static float s_acc_media[3];
 static bool s_acc_media_ok;
-#define GNC_ALABEO_MEDIA_ALFA 0.01f /* 0,25 s a 400 Hz */
+#define GNC_ALABEO_MEDIA_ALFA 0.01f /* 0,24 s a 416 Hz */
 
 static bool _nav_alineado(void);
 static void _rampa_usar(float desde_vertical_deg, float rumbo_deg,
@@ -137,8 +137,8 @@ static void _poner_alabeo(float v[3]) {
   v[2] = (-s * y) + (c * z);
 }
 
-/* Planificación a 400 Hz con el contador de ciclos: HAL_GetTick() va en ms y
- * 2,5 ms no se pueden contar con él */
+/* Planificación a 416 Hz con el contador de ciclos: HAL_GetTick() va en ms y
+ * 2,404 ms no se pueden contar con él */
 static uint32_t s_period_cycles;
 static uint32_t s_next_cycles;
 static uint32_t s_last_tick_ms; /* para no fiarse del contador si da la vuelta */
@@ -399,6 +399,13 @@ static void _fill_sm_inputs(void) {
   sm->telemetry_cmd.cmd_param = s_cmd.param;
   sm->telemetry_cmd.cmd_valid = s_cmd.sm_pending ? 1U : 0U;
   s_cmd.sm_pending = false;
+  /* Restauración tras un reinicio (v1.6): NO se usa. Reiniciada en el aire,
+   * la core no vuelve al GNC sino al modo de emergencia (emergencia.h): el
+   * filtro no se puede alinear con el cohete volando. valid = 0 es arrancar
+   * normal, que es lo que pide la entrega si no se restaura. */
+  sm->restore.valid = 0U;
+  sm->restore.rocket_state = 0;
+  sm->restore.flight_phase = 0;
 }
 
 /* COPIA COMPLETA de una vez, del mismo tick: el guiado tiene que ver todos
@@ -416,6 +423,14 @@ static void _fill_gc_inputs(void) {
   gc->nav_valid = nav->nav_valid;
   gc->timestamp_s = nav->timestamp_s;
   gc->rocket_state = state_machine_Y.sm_out.rocket_state;
+  /* v1.6: el fallo en vuelo solo se ve aquí (la máquina de estados no sale
+   * de EN VUELO), y con él el guiado abre el aerofreno al máximo */
+  gc->error_code = state_machine_Y.sm_out.error_code;
+  gc->nav_init_flags = nav->nav_init_flags;
+  gc->gnss_only = nav->gnss_only;
+  gc->restore.valid = 0U; /* ver _fill_sm_inputs */
+  gc->restore.rocket_state = 0;
+  gc->restore.flight_phase = 0;
   gc->telemetry_cmd.cmd_id = s_cmd.id;
   gc->telemetry_cmd.cmd_param = s_cmd.param;
   gc->telemetry_cmd.cmd_valid = s_cmd.gc_pending ? 1U : 0U;
@@ -464,6 +479,8 @@ static void _collect_outputs(void) {
   s_data.gnss_age_s = nav->gnss_age_s;
   s_data.gnss_only = (nav->gnss_only != 0U);
   s_data.nav_valid = (nav->nav_valid != 0U);
+  s_data.nav_ready = (nav->nav_ready != 0U);
+  s_data.nav_init_flags = nav->nav_init_flags;
 
   /* Por que el EKF no se alinea: los mismos numeros que mira el modelo */
   const nav_bus_in *in = &nav_U.nav_in;
@@ -491,7 +508,8 @@ static void _collect_outputs(void) {
   s_data.rocket_state = sm->rocket_state;
   s_data.error_code = sm->error_code;
 
-  /* Del guiado: lo del último paso (cambia a 50 Hz) */
+  /* Del guiado: lo del último paso (cambia a 52 Hz) */
+  s_data.status_word = gc->status_word;
   s_data.flight_phase = gc->flight_phase;
   s_data.apogee_pred_m = gc->apogee_pred_m;
   s_data.apogee_error_m = gc->apogee_error_m;

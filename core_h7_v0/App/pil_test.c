@@ -19,14 +19,14 @@
 #define PIL_MAGIC "LEEMPI12"
 #define PIL_SD SD_CARD_1
 
-/* Cada cuántas filas se da un paso de guiado (PIL_manifest.txt: gc a 50 Hz,
+/* Cada cuántas filas se da un paso de guiado (PIL_manifest.txt: gc a 52 Hz,
  * uno de cada 8 de nav y máquina de estados) */
 #define PIL_GC_CADA GNC_GC_DECIMATION
 
-/* PILNAVO.CSV: una fila de cada esto. Las 72609 enteras son ~40 MB de SD. */
+/* PILNAVO.CSV: una fila de cada esto. Las 76487 enteras son ~42 MB de SD. */
 #define PIL_NAV_CSV_CADA 4U
 
-/* Valores de fábrica de nav_tun (nav_data.c de la v1.5). El dataset se
+/* Valores de fábrica de nav_tun (nav.c de la v1.6, iguales que en la v1.5). El dataset se
  * generó con los ajustables de fábrica, y gnc_init() pone los de la rampa. */
 #define PIL_RAIL_ELEV_FABRICA 84.5f
 #define PIL_RAIL_AZIM_FABRICA 0.0f
@@ -84,6 +84,8 @@ typedef struct __attribute__((packed)) {
   uint8_t gnss_only;
   double timestamp_s;
   uint8_t nav_valid;
+  uint8_t nav_ready;      /* v1.6 */
+  uint8_t nav_init_flags; /* v1.6 */
 } pil_nav_exp_t;
 
 typedef struct __attribute__((packed)) {
@@ -98,6 +100,9 @@ typedef struct __attribute__((packed)) {
   uint8_t cmd_id;
   float cmd_param;
   uint8_t cmd_valid;
+  uint8_t restore_valid;        /* v1.6 */
+  int32_t restore_rocket_state; /* v1.6 */
+  int32_t restore_flight_phase; /* v1.6 */
 } pil_sm_in_t;
 
 typedef struct __attribute__((packed)) {
@@ -119,9 +124,15 @@ typedef struct __attribute__((packed)) {
   uint8_t nav_valid;
   double timestamp_s;
   int32_t rocket_state;
+  uint8_t error_code; /* v1.6 */
   uint8_t cmd_id;
   float cmd_param;
   uint8_t cmd_valid;
+  uint8_t restore_valid;        /* v1.6 */
+  int32_t restore_rocket_state; /* v1.6 */
+  int32_t restore_flight_phase; /* v1.6 */
+  uint8_t nav_init_flags;       /* v1.6 */
+  uint8_t gnss_only;            /* v1.6 */
 } pil_gc_in_t;
 
 typedef struct __attribute__((packed)) {
@@ -138,15 +149,16 @@ typedef struct __attribute__((packed)) {
   uint8_t pred_valid;
   uint8_t pyro_armed;
   double timestamp_s;
+  uint32_t status_word; /* v1.6 */
 } pil_gc_exp_t;
 
-/* Lo que da tools/pil_csv_to_bin.py con el manifiesto de la v1.5 */
+/* Lo que da tools/pil_csv_to_bin.py con el manifiesto de la v1.6 */
 _Static_assert(sizeof(pil_nav_in_t) == 123U, "PILNAVI: no cuadra con el manifiesto");
-_Static_assert(sizeof(pil_nav_exp_t) == 158U, "PILNAVE: no cuadra con el manifiesto");
-_Static_assert(sizeof(pil_sm_in_t) == 71U, "PILSMI: no cuadra con el manifiesto");
+_Static_assert(sizeof(pil_nav_exp_t) == 160U, "PILNAVE: no cuadra con el manifiesto");
+_Static_assert(sizeof(pil_sm_in_t) == 80U, "PILSMI: no cuadra con el manifiesto");
 _Static_assert(sizeof(pil_sm_exp_t) == 22U, "PILSME: no cuadra con el manifiesto");
-_Static_assert(sizeof(pil_gc_in_t) == 75U, "PILGCI: no cuadra con el manifiesto");
-_Static_assert(sizeof(pil_gc_exp_t) == 44U, "PILGCE: no cuadra con el manifiesto");
+_Static_assert(sizeof(pil_gc_in_t) == 87U, "PILGCI: no cuadra con el manifiesto");
+_Static_assert(sizeof(pil_gc_exp_t) == 48U, "PILGCE: no cuadra con el manifiesto");
 
 /* === Tolerancias (PIL_manifest.txt) ====================================== */
 
@@ -181,6 +193,10 @@ typedef struct {
   double worst_ratio;
   uint32_t worst_step;
   uint32_t max_us;
+  /* Discrepancias por campo: dicen si lo que falla es numerico (reales) o
+   * logico (enteros: fases, banderas), que no es lo mismo */
+  const char *campo[8];
+  uint32_t por_campo[8];
 } pil_check_t;
 
 /* === Utilidades ========================================================== */
@@ -234,6 +250,13 @@ static void _fallo(pil_check_t *c, uint32_t step, const char *name,
     c->first_fail_want = want;
   }
   c->mismatches++;
+  for (uint32_t i = 0U; i < 8U; i++) {
+    if ((c->campo[i] == name) || (c->campo[i] == NULL)) {
+      c->campo[i] = name;
+      c->por_campo[i]++;
+      break;
+    }
+  }
 }
 
 static void _real(pil_check_t *c, uint32_t step, const char *name, double got,
@@ -285,7 +308,7 @@ static bool _open_vectors(storage_stream_t *st, const char *path,
   pil_header_t h;
   if (!storage_stream_read(st, &h, sizeof(h)) ||
       (memcmp(h.magic, PIL_MAGIC, sizeof(h.magic)) != 0)) {
-    _report("   %s: no es un archivo PIL de la v1.5 (regenerar con"
+    _report("   %s: no es un archivo PIL de la v1.6 (regenerar con"
             " pil_csv_to_bin.py)\r\n", path);
     (void)storage_stream_close(st);
     return false;
@@ -318,6 +341,11 @@ static void _summary(const pil_check_t *c) {
             (double)c->first_fail_step * (GNC_PERIOD_US * 1.0e-6),
             (c->first_fail_name != NULL) ? c->first_fail_name : "-",
             c->first_fail_got, c->first_fail_want);
+    _report("                         por campo:");
+    for (uint32_t i = 0U; (i < 8U) && (c->campo[i] != NULL); i++) {
+      _report(" %s %lu", c->campo[i], (unsigned long)c->por_campo[i]);
+    }
+    _report("\r\n");
   }
 }
 
@@ -373,6 +401,8 @@ static void _nav_paso(const pil_nav_in_t *r, const pil_nav_exp_t *w,
   _entero(c, step, "gnss_only", o->gnss_only, w->gnss_only);
   _real(c, step, "timestamp_s", o->timestamp_s, w->timestamp_s);
   _entero(c, step, "nav_valid", o->nav_valid, w->nav_valid);
+  _entero(c, step, "nav_ready", o->nav_ready, w->nav_ready);
+  _entero(c, step, "nav_init_flags", o->nav_init_flags, w->nav_init_flags);
 }
 
 static void _sm_paso(const pil_sm_in_t *r, const pil_sm_exp_t *w,
@@ -389,6 +419,9 @@ static void _sm_paso(const pil_sm_in_t *r, const pil_sm_exp_t *w,
   u->telemetry_cmd.cmd_id = r->cmd_id;
   u->telemetry_cmd.cmd_param = r->cmd_param;
   u->telemetry_cmd.cmd_valid = r->cmd_valid;
+  u->restore.valid = r->restore_valid;
+  u->restore.rocket_state = r->restore_rocket_state;
+  u->restore.flight_phase = r->restore_flight_phase;
 
   const uint32_t t0 = DWT->CYCCNT;
   state_machine_step();
@@ -418,9 +451,15 @@ static void _gc_paso(const pil_gc_in_t *r, const pil_gc_exp_t *w,
   u->nav_valid = r->nav_valid;
   u->timestamp_s = r->timestamp_s;
   u->rocket_state = r->rocket_state;
+  u->error_code = r->error_code;
   u->telemetry_cmd.cmd_id = r->cmd_id;
   u->telemetry_cmd.cmd_param = r->cmd_param;
   u->telemetry_cmd.cmd_valid = r->cmd_valid;
+  u->restore.valid = r->restore_valid;
+  u->restore.rocket_state = r->restore_rocket_state;
+  u->restore.flight_phase = r->restore_flight_phase;
+  u->nav_init_flags = r->nav_init_flags;
+  u->gnss_only = r->gnss_only;
 
   const uint32_t t0 = DWT->CYCCNT;
   gc_step();
@@ -445,6 +484,9 @@ static void _gc_paso(const pil_gc_in_t *r, const pil_gc_exp_t *w,
   _entero(c, step, "pred_valid", o->pred_valid, w->pred_valid);
   _entero(c, step, "pyro_armed", o->pyro_armed, w->pyro_armed);
   _real(c, step, "timestamp_s", o->timestamp_s, w->timestamp_s);
+  /* Los bits 26-31 van a cero: cabe en un int32 sin cambiar de signo */
+  _entero(c, step, "status_word", (int32_t)o->status_word,
+          (int32_t)w->status_word);
 }
 
 /* === Prueba ============================================================== */
@@ -458,8 +500,8 @@ void pil_test_run(void) {
                                              sizeof(s_summary_buf));
 
   _report("\r\n=================================================\r\n");
-  _report(" BANCO PIL DEL GNC v1.5  (nav y maquina de estados a\r\n");
-  _report(" 400 Hz, guiado a 50 Hz; 181,5 s, vuelo entero)\r\n");
+  _report(" BANCO PIL DEL GNC v1.6  (nav y maquina de estados a\r\n");
+  _report(" 416 Hz, guiado a 52 Hz; 183,9 s, vuelo entero)\r\n");
   _report("=================================================\r\n");
   if (!s_summary_open) {
     DebugOut_Printf("   (sin PILRES.TXT: la SD1 no esta montada)\r\n");

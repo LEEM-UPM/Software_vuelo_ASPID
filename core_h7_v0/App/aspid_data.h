@@ -1,7 +1,7 @@
 /*
  * Registro de cada sesión en la SD1: telemetría desde el arranque, datos de
  * vuelo a 100 Hz desde el despegue hasta los 50 m de bajada, y las IMU a
- * 400 Hz durante el motor (la curva de empuje).
+ * 416 Hz durante el motor (la curva de empuje).
  *
  * Cada arranque crea en la raíz de la SD1:
  *
@@ -17,7 +17,7 @@
  *                                       y bytes) y cada uno que llega (bytes,
  *                                       cómo se oyó y qué se hizo con él)
  *     vuelo/vuelo_01.csv                100 Hz, despegue -> 50 m bajando
- *     trust_curve/trust_curve_01.csv    las dos IMU a 400 Hz, del medio
+ *     trust_curve/trust_curve_01.csv    las dos IMU a 416 Hz, del medio
  *                                       segundo antes del despegue a 5 s
  *                                       después de apagarse el motor
  *     simulaciones/sim_01.csv           lo mismo durante un SIMULAR RUTA
@@ -101,7 +101,7 @@
 #define ASPID_DATA_MAX_VUELO_MS (20U * 60U * 1000U)
 #define ASPID_DATA_SYNC_MS 1000U          /* tamaños al directorio */
 
-/* Trust curve: una fila por tick del GNC (400 Hz) */
+/* Trust curve: una fila por tick del GNC (416 Hz) */
 #define ASPID_DATA_EMPUJE_ANTES_MS 500U
 #define ASPID_DATA_EMPUJE_DESPUES_MS 5000U /* tras salir de BOOST */
 #define ASPID_DATA_EMPUJE_MAX_MS 30000U    /* por si el GNC no lo dice */

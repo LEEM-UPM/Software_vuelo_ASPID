@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'state_machine'.
  *
- * Model version                  : 3.20
+ * Model version                  : 3.46
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Tue Oct  6 00:35:58 2026
+ * C/C++ source code generated on : Sat Oct 10 20:59:58 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -32,6 +32,18 @@ typedef struct {
 
 #endif
 
+#ifndef DEFINED_TYPEDEF_FOR_restore_bus_
+#define DEFINED_TYPEDEF_FOR_restore_bus_
+
+/* Auto */
+typedef struct {
+  uint8_T valid;
+  int32_T rocket_state;
+  int32_T flight_phase;
+} restore_bus;
+
+#endif
+
 #ifndef DEFINED_TYPEDEF_FOR_sm_bus_in_
 #define DEFINED_TYPEDEF_FOR_sm_bus_in_
 
@@ -46,6 +58,7 @@ typedef struct {
   uint8_T nav_valid;
   real_T timestamp_s;
   tel_bus telemetry_cmd;
+  restore_bus restore;
 } sm_bus_in;
 
 #endif
@@ -75,6 +88,7 @@ typedef struct {
   uint8_T error_code;
   real_T t_prev_s;
   uint8_T init_done;
+  uint8_T restore_done;
 } sm_state;
 
 #endif
@@ -94,10 +108,11 @@ typedef struct {
 
 #endif
 
-#ifndef DEFINED_TYPEDEF_FOR_struct_L66pHEsgunnpVonnRi0qeC_
-#define DEFINED_TYPEDEF_FOR_struct_L66pHEsgunnpVonnRi0qeC_
+#ifndef DEFINED_TYPEDEF_FOR_struct_vX1eYV1vUdVKjjkqGtkyF_
+#define DEFINED_TYPEDEF_FOR_struct_vX1eYV1vUdVKjjkqGtkyF_
 
 typedef struct {
+  real_T restore_window_s;
   real_T dt;
   real_T g0;
   real_T launch_accel_g_thr;
@@ -110,7 +125,7 @@ typedef struct {
   real_T stall_timeout_s;
   uint16_T stall_timeout_n;
   uint8_T check_nav_in_maint;
-} struct_L66pHEsgunnpVonnRi0qeC;
+} struct_vX1eYV1vUdVKjjkqGtkyF;
 
 #endif
 #endif                                 /* state_machine_types_h_ */

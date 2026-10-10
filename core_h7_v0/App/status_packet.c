@@ -185,7 +185,10 @@ void status_packet_build(const sys_state *state,
                                                : (uint8_t)(g->flight_phase & 0x07);
     const uint8_t estado =
         (g->rocket_state < 0) ? 0U : (uint8_t)(g->rocket_state & 0x07);
-    out[24] = (uint8_t)(fase | (uint8_t)(estado << 3));
+    const uint8_t f = g->nav_init_flags;
+    out[24] = (uint8_t)(fase | (uint8_t)(estado << 3) |
+                        (((f & GNC_NAV_INIT_ALINEADO) != 0U) ? 0x40U : 0U) |
+                        (((f & GNC_NAV_INIT_BARO) != 0U) ? 0x80U : 0U));
   }
 
   /* --- 25 a 28: modo test --- */
@@ -193,6 +196,12 @@ void status_packet_build(const sys_state *state,
                       (uint8_t)((uplink_ultimo_piro() & 0x07U) << 1) |
                       (gnc_playback_active() ? 0x10U : 0U) |
                       (emergencia_postvuelo() ? 0x20U : 0U));
+  if (g != NULL) {
+    out[25] |= (uint8_t)((((g->nav_init_flags & GNC_NAV_INIT_GNSS) != 0U)
+                              ? 0x40U : 0U) |
+                         (((g->nav_init_flags & GNC_NAV_INIT_DEGRADADO) != 0U)
+                              ? 0x80U : 0U));
+  }
   out[26] = _sat_u8(uplink_test_restante_s());
   out[27] = _sat_u8(uplink_piros_aceptados());
   out[28] = _sat_u8(uplink_denegados());

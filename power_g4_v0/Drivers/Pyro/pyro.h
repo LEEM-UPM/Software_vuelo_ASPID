@@ -54,6 +54,31 @@ bool Pyro2B_Continuity(void);
 /* Ver PYRO_PRUEBA_ARRANQUE: solo en el banco y sin cargas */
 void AllPyroCheck(void);
 
+/*
+ * PRUEBA SIN CAN (2026-10-09). Nada más arrancar, sin esperar el wake up ni
+ * nada del CAN, enciende la alimentación de los dos pares (Pyro1, Pyro2) y
+ * los cuatro canales (1A, 1B, 2A, 2B) A LA VEZ, y los deja ENCENDIDOS hasta
+ * que se quite la corriente: sin apagado automático. Es para ver en el banco
+ * que cada etapa responde (LED, polímetro, osciloscopio). La placa no hace
+ * nada más: ni CAN, ni continuidad, ni watchdog.
+ *
+ * SOLO EN EL BANCO Y SIN CARGAS: con un iniciador conectado lo dispara al
+ * encender. Por eso aquí se queda a 0 y la prueba se compila aparte, en su
+ * propia carpeta, sin tocar este archivo:
+ *
+ *   cmake --preset Debug -B build/PruebaPiros -DCMAKE_C_FLAGS=-DPYRO_PRUEBA_SIN_CAN=1
+ *   cmake --build build/PruebaPiros
+ *
+ * (avisa al compilar). Para volver al firmware de vuelo, grabar el de
+ * build/Debug.
+ */
+#ifndef PYRO_PRUEBA_SIN_CAN
+#define PYRO_PRUEBA_SIN_CAN 0
+#endif
+
+/* Ver PYRO_PRUEBA_SIN_CAN. No vuelve. */
+void PyroPruebaSinCan(void);
+
 #ifdef __cplusplus
 }
 #endif

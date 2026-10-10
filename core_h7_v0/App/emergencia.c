@@ -418,7 +418,7 @@ void emergencia_update(void) {
   }
 
   /* Lo que verán los demás por gnc_get_data() */
-  s_gnc.steps = (ahora * 2U) / 5U; /* 400 Hz */
+  s_gnc.steps = (uint32_t)(((uint64_t)ahora * GNC_RATE_HZ) / 1000U);
   s_gnc.gc_steps = gc;             /* 50 Hz: airbrake.c manda en cada uno */
   s_gnc.rocket_state = GNC_ESTADO_EN_VUELO;
   s_gnc.flight_phase = _fase();
@@ -429,7 +429,9 @@ void emergencia_update(void) {
   const float m0 = baro_alt_canal(0)->max_m;
   const float m1 = baro_alt_canal(1)->max_m;
   s_gnc.apogee_pred_m = (m0 > m1) ? m0 : m1;
-  s_gnc.actuator_cmd = s_freno;
+  /* En la escala del GNC (0..GNC_ACTUADOR_MAX), que es la que espera
+   * airbrake.c; s_freno es extension 0..1 */
+  s_gnc.actuator_cmd = s_freno * GNC_ACTUADOR_MAX;
   s_gnc.drogue_flag =
       (s_t_drogue != 0U) && ((ahora - s_t_drogue) < EMERGENCIA_BANDERA_MS);
   s_gnc.main_flag =

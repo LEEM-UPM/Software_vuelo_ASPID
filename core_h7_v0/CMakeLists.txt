@@ -92,7 +92,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     third_party/stm32_usb_device_library/Core/Src/usbd_ctlreq.c
     third_party/stm32_usb_device_library/Core/Src/usbd_ioreq.c
     third_party/stm32_usb_device_library/Class/CDC/Src/usbd_cdc.c
-    # GNC generado con Simulink (ASPID v1.5): navegacion, maquina de estados y
+    # GNC generado con Simulink (ASPID v1.6): navegacion, maquina de estados y
     # guiado. shared/ va una sola vez (ver third_party/aspid_gnc/README.md)
     third_party/aspid_gnc/nav/nav.c
     third_party/aspid_gnc/nav/nav_data.c
@@ -104,7 +104,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     third_party/aspid_gnc/shared/rtGetNaN.c
 )
 
-# El codigo generado (desde la v1.2, y sigue en la v1.5) define rt_powd_snf()
+# El codigo generado (desde la v1.2, y sigue en la v1.6) define rt_powd_snf()
 # sin static en nav.c Y en gc.c (identicas), y el enlazado da "multiple
 # definition". Sin tocar el codigo generado: la de gc.c se compila con otro
 # nombre. Hay que avisar a GNC (PENDIENTES); si la proxima entrega la saca a
@@ -112,13 +112,19 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 set_source_files_properties(third_party/aspid_gnc/gc/gc.c PROPERTIES
     COMPILE_DEFINITIONS "rt_powd_snf=gc_rt_powd_snf")
 
-# El GNC corre a 400 Hz (2,5 ms por tick) y el EKF de la v1.2 a -O0 tardaba
+# El GNC corre a 416 Hz (2,4 ms por tick) y el EKF de la v1.2 a -O0 tardaba
 # ~10 ms:
 # el codigo generado se optimiza siempre, tambien en Debug. Y el registro de
 # la SD (aspid_data.c), que formatea ~90 numeros por fila a 100 Hz en el
 # mismo bucle. El resto del
 # proyecto sigue a -O0 para poder depurarlo. Sin -ffast-math: el modelo mira
 # NaN e infinitos (rtIsNaN) y el banco PIL compara con tolerancias finas.
+#
+# -ffp-contract=off (2026-10-11, GNC v1.6): a -O2 el GCC de ARM junta
+# multiplicacion y suma en una sola instruccion (FMA), que redondea distinto.
+# Con eso el banco PIL en la placa daba 751 discrepancias en el guiado (solo
+# en reales: apogeo previsto, error, mando...; ninguna en fases ni banderas);
+# sin FMA, 0, igual que el modelo y que el PC. Cuesta ~0,1 ms en el peor tick.
 set_source_files_properties(
     third_party/aspid_gnc/nav/nav.c
     third_party/aspid_gnc/nav/nav_data.c
@@ -130,7 +136,7 @@ set_source_files_properties(
     third_party/aspid_gnc/shared/rtGetNaN.c
     App/gnc.c
     App/aspid_data.c
-    PROPERTIES COMPILE_OPTIONS "-O2")
+    PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off")
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App

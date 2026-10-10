@@ -16,6 +16,7 @@ import math
 import time
 
 from widgets import (AMBAR, APAGADO, AZUL, CIAN, FONDO, MAGENTA, REJILLA, ROJO,
+                     VIOLETA,
                      VERDE, VERDE_MED, VERDE_OSC, Panel, barra_con_centro,
                      barra_segmentada, circulo_fase, fuente, lampara, rejilla,
                      traza)
@@ -66,9 +67,13 @@ class PanelCabecera(Panel):
         x0, y0, x1, y1 = self.area()
         cy = (y0 + y1) / 2.0
 
-        self.create_text(x0 + 4, cy - 7, text="L E E M", anchor="w",
+        # Logo: una franja con los colores de las cuatro familias de paneles
+        for k, col in enumerate((VERDE, AZUL, CIAN, VIOLETA)):
+            self.create_rectangle(x0 + 2 + k * 4, cy - 12, x0 + 4 + k * 4,
+                                  cy + 12, fill=col, outline="")
+        self.create_text(x0 + 22, cy - 7, text="L E E M", anchor="w",
                          fill=VERDE, font=fuente(13, True))
-        self.create_text(x0 + 4, cy + 8, text="ESTACION DE TIERRA",
+        self.create_text(x0 + 22, cy + 8, text="ESTACION DE TIERRA",
                          anchor="w", fill=VERDE_MED, font=fuente(8))
 
         if e is None:
@@ -109,8 +114,126 @@ class PanelCabecera(Panel):
         self.create_text(x1 - 4, cy, text=time.strftime("%H:%M:%S"),
                          anchor="e", fill=VERDE_MED, font=fuente(12, True))
 
+        # La mascota, en el hueco entre los campos y el reloj
+        _serpiente(self, x + 10, x1 - 110, cy, y1 - y0)
+
+
+# --- La serpiente del parche de la mision (solo decoracion) -----------------
+
+# Los colores del parche ASPID / LEEM '26
+SERP_CIAN = "#3fc8d9"
+SERP_AMARILLO = "#f5cf3a"
+SERP_ROSA = "#e3549e"
+SERP_CUERPO = "#2a1d3d"
+SERP_CREMA = "#f1e3b4"
+
+
+def _estrella(c, x, y, r, color):
+    """Estrella de cuatro puntas, como las del parche."""
+    q = r * 0.3
+    c.create_polygon(x, y - r, x + q, y - q, x + r, y, x + q, y + q,
+                     x, y + r, x - q, y + q, x - r, y, x - q, y - q,
+                     fill=color, outline="")
+
+
+def _serpiente(c, xa, xb, cy, alto):
+    """
+    Una serpiente de lineas que repta despacio, con los colores del parche.
+    Se adapta al hueco que haya; si es muy estrecho, no se pinta. No lleva
+    ningun dato: es decoracion.
+    """
+    if xb - xa < 170:
+        return
+    # Rotulo a la izquierda
+    c.create_text(xa, cy - 7, text="ASPID", anchor="w", fill=SERP_CIAN,
+                  font=fuente(11, True))
+    c.create_text(xa, cy + 9, text="LEEM '26", anchor="w",
+                  fill=SERP_AMARILLO, font=fuente(8, True))
+    xa += 78
+
+    t = time.monotonic()
+    largo = xb - xa - 16                      # sitio para la cabeza
+    amp = alto * 0.22
+    n = 44
+    fase = t * 1.6
+    pts = []
+    for i in range(n + 1):
+        f = i / float(n)
+        # Mas onda en la cola que junto a la cabeza
+        env = 0.35 + 0.65 * (1.0 - f) ** 0.7
+        pts.append((xa + f * largo,
+                    cy + amp * env * math.sin(2 * math.pi * 2.2 * f - fase)))
+
+    def grosor(i):
+        return 2.0 + 8.0 * (i / float(n)) ** 0.8   # de la cola a la cabeza
+
+    # Tres pasadas para que el contorno quede siempre por debajo
+    for capa in range(3):
+        for i in range(n):
+            (ax, ay), (bx, by) = pts[i], pts[i + 1]
+            w = grosor(i)
+            if capa == 0:
+                c.create_line(ax, ay, bx, by, fill=SERP_CIAN, width=w + 3,
+                              capstyle="round")
+            elif capa == 1:
+                c.create_line(ax, ay, bx, by, fill=SERP_CUERPO, width=w,
+                              capstyle="round")
+            elif w > 4:
+                c.create_line(ax, ay, bx, by, fill=SERP_ROSA,
+                              width=max(1.0, w * 0.3), capstyle="round")
+    # Anillos crema
+    for i in range(6, n, 5):
+        (ax, ay), (bx, by) = pts[i], pts[i + 1]
+        dx, dy = bx - ax, by - ay
+        d = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy / d, dx / d
+        h = grosor(i) / 2.0
+        c.create_line(ax - nx * h, ay - ny * h, ax + nx * h, ay + ny * h,
+                      fill=SERP_CREMA, width=1)
+
+    # Cabeza, mirando hacia donde va el cuerpo
+    (ax, ay), (hx, hy) = pts[-2], pts[-1]
+    dx, dy = hx - ax, hy - ay
+    d = math.hypot(dx, dy) or 1.0
+    ux, uy = dx / d, dy / d
+    vx, vy = -uy, ux
+    L, W = 16.0, 8.5
+    cabeza = [hx - ux * 2 + vx * W, hy - uy * 2 + vy * W,
+              hx + ux * L * 0.7 + vx * W * 0.8, hy + uy * L * 0.7 + vy * W * 0.8,
+              hx + ux * L, hy + uy * L,
+              hx + ux * L * 0.7 - vx * W * 0.8, hy + uy * L * 0.7 - vy * W * 0.8,
+              hx - ux * 2 - vx * W, hy - uy * 2 - vy * W]
+    c.create_polygon(cabeza, fill=SERP_CUERPO, outline=SERP_CIAN, width=2,
+                     smooth=True)
+    ex, ey = hx + ux * L * 0.45 - vx * W * 0.35, hy + uy * L * 0.45 - vy * W * 0.35
+    c.create_oval(ex - 2.2, ey - 2.2, ex + 2.2, ey + 2.2, fill=SERP_AMARILLO,
+                  outline="")
+    c.create_oval(ex - 0.8, ey - 1.6, ex + 0.8, ey + 1.6, fill=FONDO,
+                  outline="")
+    # Lengua, a ratos
+    if (t % 1.6) < 0.5:
+        tx, ty = hx + ux * (L + 1), hy + uy * (L + 1)
+        fx, fy = tx + ux * 7, ty + uy * 7
+        c.create_line(tx, ty, fx, fy, fill=SERP_ROSA, width=1.5)
+        for sg in (1, -1):
+            c.create_line(fx, fy, fx + ux * 3 + vx * 2.5 * sg,
+                          fy + uy * 3 + vy * 2.5 * sg, fill=SERP_ROSA,
+                          width=1.5)
+
+    # Estrellas del parche
+    for fx, fy, r in ((0.18, -0.36, 4), (0.55, 0.38, 3), (0.86, -0.34, 3.5)):
+        _estrella(c, xa + fx * largo, cy + fy * alto, r, SERP_AMARILLO)
+
 
 # --- Columna de medidores ---------------------------------------------------
+
+
+def _marca_cats(panel, e, x, y, anchor="center"):
+    """Con el boton DATOS en CATS, que se vea en cada panel que lo pintado
+    es de CATS y no nuestro."""
+    if e is not None and e.ver_cats:
+        panel.create_text(x, y, text="CATS", anchor=anchor, fill=MAGENTA,
+                          font=fuente(8, True))
 
 
 class PanelMedidores(Panel):
@@ -144,7 +267,11 @@ class PanelMedidores(Panel):
         for i, (etq, attr, lo, hi, uni, col) in enumerate(self.MEDIDAS):
             cx = x0 + ancho * (i + 0.5)
 
-            if attr is not None and p is not None:
+            if e is not None and attr in e.SOLAPADOS:
+                v = e.dato(attr)   # de CATS si se ha elegido CATS
+                if e.ver_cats:
+                    col = MAGENTA
+            elif attr is not None and p is not None:
                 v = getattr(p, attr)
             elif p is not None and etq == "ACC":
                 v = p.accel_modulo_g
@@ -188,14 +315,16 @@ class PanelPerfil(Panel):
         e = self.estado
         x0, y0, x1, y1 = self.area()
         rejilla(self, x0, y0, x1, y1, nx=8, ny=4)
-        if not e or not e.hist_altura:
+        _marca_cats(self, e, (x0 + x1) / 2, y0 + 7)
+        hist = e.hist("altura") if e else None
+        if not hist:
             self.create_text((x0 + x1) / 2, (y0 + y1) / 2, text="SIN DATOS",
                              fill=VERDE_OSC, font=fuente(9))
             return
 
-        datos = list(e.hist_altura)
+        datos = list(hist)
         lo, hi = traza(self, x0 + 1, y0 + 1, x1 - 1, y1 - 1, datos,
-                       color=VERDE, relleno=True)
+                       color=MAGENTA if e.ver_cats else VERDE, relleno=True)
         self.create_text(x0 + 4, y0 + 7, text="%.0f m" % hi, anchor="w",
                          fill=VERDE_MED, font=fuente(7))
         self.create_text(x0 + 4, y1 - 7, text="%.0f m" % lo, anchor="w",
@@ -203,9 +332,10 @@ class PanelPerfil(Panel):
         self.create_text(x1 - 4, y0 + 7,
                          text="AHORA %.1f m" % datos[-1], anchor="e",
                          fill=VERDE, font=fuente(8, True))
-        # Apogeo previsto por el guiado, para comparar de un vistazo
+        # Apogeo previsto por el guiado, para comparar de un vistazo (es
+        # nuestro: viendo CATS no pinta)
         p = e.paquete
-        if p is not None and p.apogeo_m > 0 and hi > lo:
+        if not e.ver_cats and p is not None and p.apogeo_m > 0 and hi > lo:
             f = (p.apogeo_m - lo) / (hi - lo)
             if 0.0 <= f <= 1.0:
                 y = y1 - f * (y1 - y0)
@@ -227,9 +357,11 @@ class PanelVelocidad(Panel):
         cy = (y0 + y1) / 2.0
         self.create_line(x0, cy, x1, cy, fill=VERDE_OSC)
 
-        if not e or not e.hist_vv:
+        _marca_cats(self, e, x0 + 46, y0 + 6, anchor="w")
+        hist = e.hist("vv") if e else None
+        if not hist:
             return
-        datos = list(e.hist_vv)
+        datos = list(hist)
         fondo = max(20.0, max(abs(v) for v in datos) * 1.15)
         n = len(datos)
         ancho = (x1 - x0) / float(max(n, 1))
@@ -256,8 +388,10 @@ class PanelFases(Panel):
     def pintar(self):
         e = self.estado
         x0, y0, x1, y1 = self.area()
-        p = e.paquete if e else None
-        activa = p.fase if p is not None else -1
+        activa = e.dato("fase") if e else None
+        if activa is None:
+            activa = -1
+        _marca_cats(self, e, x1 - 4, y0 + 6, anchor="e")
         cy = (y0 + y1) / 2.0 - 4
         n = len(pq.FASES)
         paso = (x1 - x0) / float(n)
@@ -400,6 +534,11 @@ class PanelActitud(Panel):
 # --- Números grandes --------------------------------------------------------
 
 
+# Apogeo al que apunta el guiado (gc_tun.apogee_target_agl_m del GNC v1.5).
+# El error del apogeo previsto se mide contra esto.
+APOGEO_OBJETIVO_M = 3000.0
+
+
 class PanelNumeros(Panel):
     """Las cifras que se cantan en voz alta durante el vuelo."""
 
@@ -408,23 +547,50 @@ class PanelNumeros(Panel):
         x0, y0, x1, y1 = self.area()
         p = e.paquete if e else None
 
+        cats = e is not None and e.ver_cats
+        _marca_cats(self, e, x1 - 4, y0 + 6, anchor="e")
+
+        # Error del apogeo: previsto - objetivo. Con el previsto a 0 (el
+        # guiado aun no lo calcula) no hay error que dar.
+        apogeo = p.apogeo_m if p is not None else None
+        error = (apogeo - APOGEO_OBJETIVO_M) if apogeo else None
+
+        # (etiqueta, valor, unidad, color, tamaño, mitad derecha o None)
         filas = (
-            ("ALTURA", _num(p and p.altura_m, "%.1f"), "m", VERDE, 22),
-            ("VEL VERTICAL", _num(p and p.vel_vertical_mps, "%+.2f"), "m/s",
-             VERDE, 22),
-            ("APOGEO PREVISTO", _num(p and p.apogeo_m, "%.0f"), "m", AMBAR, 16),
-            ("AEROFRENO", _num(p and p.aerofreno_pct, "%.0f"), "%", CIAN, 16),
+            ("ALTURA", _num(e and e.dato("altura_m"), "%.1f"), "m",
+             MAGENTA if cats else VERDE, 22, None),
+            ("VEL VERTICAL", _num(e and e.dato("vel_vertical_mps"), "%+.2f"),
+             "m/s", MAGENTA if cats else VERDE, 22, None),
+            ("APOGEO PREVISTO", _num(apogeo, "%.0f"), "m", AMBAR, 16,
+             ("ERROR (OBJETIVO %.0f m)" % APOGEO_OBJETIVO_M,
+              _num(error, "%+.0f"), "m", AMBAR)),
+            ("AEROFRENO", _num(p and p.aerofreno_pct, "%.0f"), "%", CIAN, 16,
+             None),
         )
         alto = (y1 - y0) / float(len(filas))
-        for i, (etq, val, uni, col, tam) in enumerate(filas):
+        xm = (x0 + x1) / 2.0
+        for i, (etq, val, uni, col, tam, der) in enumerate(filas):
             cy = y0 + alto * i
+            # Con mitad derecha, lo de la izquierda acaba en el centro
+            xv = (xm - 10) if der else x1
             self.create_text(x0 + 2, cy + 9, text=etq, anchor="w",
                              fill=VERDE_OSC, font=fuente(7))
-            self.create_text(x1 - 26, cy + alto * 0.62, text=val, anchor="e",
+            self.create_text(xv - 26, cy + alto * 0.62, text=val, anchor="e",
                              fill=col if p is not None else VERDE_OSC,
                              font=fuente(tam, True))
-            self.create_text(x1 - 2, cy + alto * 0.62, text=uni, anchor="e",
+            self.create_text(xv - 2, cy + alto * 0.62, text=uni, anchor="e",
                              fill=VERDE_MED, font=fuente(9))
+            if der:
+                d_etq, d_val, d_uni, d_col = der
+                self.create_line(xm, cy + 4, xm, cy + alto - 4, fill=REJILLA)
+                self.create_text(xm + 8, cy + 9, text=d_etq, anchor="w",
+                                 fill=VERDE_OSC, font=fuente(7))
+                self.create_text(x1 - 26, cy + alto * 0.62, text=d_val,
+                                 anchor="e",
+                                 fill=d_col if p is not None else VERDE_OSC,
+                                 font=fuente(tam, True))
+                self.create_text(x1 - 2, cy + alto * 0.62, text=d_uni,
+                                 anchor="e", fill=VERDE_MED, font=fuente(9))
             if i:
                 self.create_line(x0, cy, x1, cy, fill=REJILLA)
 
@@ -480,7 +646,8 @@ class PanelMapa(Panel):
         cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
         r = min(x1 - x0, y1 - y0) / 2.0 - 10
 
-        pista = list(e.pista) if e else []
+        pista = list(e.hist("pista")) if e else []
+        _marca_cats(self, e, x1 - 4, y0 + 6, anchor="e")
         alcance = 50.0
         if pista:
             alcance = max(50.0, max(max(abs(a), abs(b)) for a, b in pista) * 1.2)
@@ -505,7 +672,19 @@ class PanelMapa(Panel):
                              pts[-1] + 3, fill=VERDE, outline=FONDO)
 
         p = e.paquete if e else None
-        if p is not None:
+        if e is not None and e.ver_cats:
+            c = e.cats
+            if c is not None and pista:
+                n, ee = pista[-1]
+                self.create_text(x0 + 2, y0 + 6, anchor="w",
+                                 text="N %+.0f  E %+.0f m   %.5f, %.5f"
+                                 % (n, ee, c.lat, c.lon),
+                                 fill=MAGENTA, font=fuente(8))
+            elif c is not None:
+                self.create_text(x0 + 2, y0 + 6, anchor="w",
+                                 text="CATS sin GPS", fill=AMBAR,
+                                 font=fuente(8))
+        elif p is not None:
             self.create_text(x0 + 2, y0 + 6, anchor="w",
                              text="N %+.0f  E %+.0f m" % (p.norte_m, p.este_m),
                              fill=VERDE_MED, font=fuente(8))
@@ -560,6 +739,17 @@ class PanelSistema(Panel):
         col_nav = VERDE if (p and p.nav_valida) else ROJO
         lampara(self, x0 + 150, y, bool(p and p.nav_valida), "NAV VALIDA",
                 color=col_nav)
+        # GNC v1.6: listo para volar (paquete de estado v7). Es lo que hay
+        # que mirar antes de armar el iniciador, no NAV VALIDA.
+        listo = s.nav_listo if s is not None else None
+        if listo is None:
+            lampara(self, x0 + 240, y, False, "LISTO ?", color=VERDE_OSC)
+        elif listo:
+            lampara(self, x0 + 240, y, True, "LISTO VUELO", color=VERDE)
+        else:
+            falta = pq.nav_init_falta(s.nav_init)
+            lampara(self, x0 + 240, y, True,
+                    "FALTA " + (falta[0] if falta else "?"), color=AMBAR)
         y += 17
 
         if emer or (s is not None and s.version >= 6 and s.emergencia):

@@ -76,7 +76,7 @@ _Static_assert(ANILLO_SALUD >= (2U * BLOQUE), "anillo de salud");
 /* Muestras de vuelo a 100 Hz: el segundo de antes del despegue y holgura */
 #define MUESTRAS_N 128U
 #define ANTES_N ((ASPID_DATA_ANTES_MS * ASPID_DATA_HZ) / 1000U)
-/* IMU a 400 Hz (un tick del GNC): medio segundo de antes y holgura */
+/* IMU a 416 Hz (un tick del GNC): medio segundo de antes y holgura */
 #define IMU_N 256U
 #define IMU_ANTES_N ((ASPID_DATA_EMPUJE_ANTES_MS * GNC_RATE_HZ) / 1000U)
 #define FORMATO_VUELO_VUELTA 4U
@@ -96,7 +96,7 @@ typedef struct {
   uint8_t fase;
   uint8_t error;
   uint8_t flags; /* b0 nav, b1 solo GNSS, b2 piro armada, b3 drogue,
-                    b4 main, b5 simulando */
+                    b4 main, b5 simulando, b6 GNC listo para volar */
   float alt;
   float pos[3];
   float vel[3];
@@ -112,6 +112,7 @@ typedef struct {
   float aero_gnc;
   float aero_mando;
   uint8_t servo;
+  uint32_t palabra_gnc; /* gc_Y.status_word (GNC v1.6) */
   uint8_t continuidad; /* SYS_PYRO_*, 0xFF = sin dato */
   uint8_t gps_calidad;
   uint8_t gps_sats;
@@ -217,7 +218,7 @@ typedef enum {
 
 static const char CABECERA_VUELO[] =
     "t_ms,hora_utc,tick_gnc,estado,fase,error,nav_valida,solo_gnss,"
-    "piro_armada,drogue_mandado,main_mandado,simulando,"
+    "piro_armada,drogue_mandado,main_mandado,simulando,nav_listo,"
     "alt_agl_m,pos_n_m,pos_e_m,pos_d_m,vel_n_mps,vel_e_mps,vel_d_mps,"
     "q_w,q_x,q_y,q_z,alabeo_deg,cabeceo_deg,guinada_deg,"
     "acc_cuerpo_x_mps2,acc_cuerpo_y_mps2,acc_cuerpo_z_mps2,"
@@ -225,7 +226,7 @@ static const char CABECERA_VUELO[] =
     "sesgo_acc_x,sesgo_acc_y,sesgo_acc_z,sesgo_gyr_x,sesgo_gyr_y,"
     "sesgo_gyr_z,"
     "apogeo_pred_m,error_apogeo_m,t_apogeo_s,aerofreno_gnc,"
-    "aerofreno_mandado,servo_byte,"
+    "aerofreno_mandado,servo_byte,palabra_gnc,"
     "imu1_ax,imu1_ay,imu1_az,imu1_gx,imu1_gy,imu1_gz,imu1_t_us,"
     "imu2_ax,imu2_ay,imu2_az,imu2_gx,imu2_gy,imu2_gz,imu2_t_us,"
     "baro1_kpa,baro1_c,baro2_kpa,baro2_c,mag_x_ut,mag_y_ut,mag_z_ut,"
@@ -1000,7 +1001,7 @@ static char *_fila(char *p, const muestra_t *m) {
   p = _u32(p, m->fase);
   C;
   p = _u32(p, m->error);
-  for (uint32_t b = 0U; b < 6U; b++) {
+  for (uint32_t b = 0U; b < 7U; b++) {
     C;
     *p++ = (m->flags & (1U << b)) ? '1' : '0';
   }
@@ -1050,6 +1051,8 @@ static char *_fila(char *p, const muestra_t *m) {
   p = _f(p, m->aero_mando, 3);
   C;
   p = _u32(p, m->servo);
+  C;
+  p = _u32(p, m->palabra_gnc);
 
   const float *imu[4] = {m->imu1_a, m->imu1_g, m->imu2_a, m->imu2_g};
   for (uint32_t k = 0U; k < 4U; k++) {
@@ -1175,7 +1178,9 @@ static void _tomar(muestra_t *m, const sys_state *state, uint32_t ahora) {
                        (g->pyro_armed ? 0x04U : 0U) |
                        (despliegue_drogue_mandado() ? 0x08U : 0U) |
                        (despliegue_main_mandado() ? 0x10U : 0U) |
-                       (gnc_playback_active() ? 0x20U : 0U));
+                       (gnc_playback_active() ? 0x20U : 0U) |
+                       (g->nav_ready ? 0x40U : 0U));
+  m->palabra_gnc = g->status_word;
   m->alt = g->alt_agl_m;
   memcpy(m->pos, g->pos_ned_m, sizeof(m->pos));
   memcpy(m->vel, g->vel_ned_mps, sizeof(m->vel));
@@ -1432,7 +1437,10 @@ static void _muestrear(const sys_state *state, uint32_t ahora) {
     return;
   }
   const gnc_data_t *g = gnc_get_data();
-  const uint32_t bloque = g->steps / (GNC_RATE_HZ / ASPID_DATA_HZ);
+  /* Por tiempo y no "cada N ticks": a 416 Hz no sale un N entero para 100
+   * filas por segundo (cada 4 serian 104) */
+  const uint32_t bloque =
+      (uint32_t)(((uint64_t)g->steps * ASPID_DATA_HZ) / GNC_RATE_HZ);
   if (bloque == s_bloque_gnc) {
     return;
   }
@@ -1451,7 +1459,7 @@ static void _muestrear(const sys_state *state, uint32_t ahora) {
   _vigilar(m, ahora);
 }
 
-/* Una fila de IMU por tick del GNC (400 Hz) */
+/* Una fila de IMU por tick del GNC (416 Hz) */
 static void _muestrear_imu(uint32_t ahora) {
   const gnc_data_t *g = gnc_get_data();
   if (g->steps == s_steps_imu) {
@@ -2454,7 +2462,7 @@ void aspid_data_init(const sys_state *state) {
       s_fila, FILA_MAX,
       "ASPID - sesion de la core (App/aspid_data.c)\r\n\r\n"
       "== CONFIGURACION AL ARRANCAR ==\r\n"
-      "firmware compilado %s %s, GNC ASPID v1.5, protocolo CAN1 v%u.%u, CPU "
+      "firmware compilado %s %s, GNC ASPID v1.6, protocolo CAN1 v%u.%u, CPU "
       "%lu MHz\r\n"
       "SD1: arranque %lu, %lu MB (libres %lu), cluster %lu B, bus %lu kHz\r\n"
       "SD2: %s, %lu MB, bus %lu kHz\r\n"

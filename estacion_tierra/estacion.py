@@ -34,6 +34,7 @@ import tkinter as tk
 from tkinter import simpledialog
 
 import angulo
+import cats as ct
 import grabador as grab
 import paneles
 import paquete as pq
@@ -150,6 +151,17 @@ class Estado(object):
 
         # Cerrojo de la rampa: arranca PUESTO (ver CLAVE_DESBLOQUEO)
         self.bloqueado = True
+
+        # CATS (cats.py), aparte de lo nuestro. 'fuente' dice de quien se
+        # pintan los datos que se SOLAPAN (boton DATOS del mando).
+        self.fuente = "ASPID"
+        self.cats = None
+        self.cats_recibidos = 0
+        self.cats_hist_altura = deque(maxlen=400)
+        self.cats_hist_vv = deque(maxlen=90)
+        self.cats_pista = deque(maxlen=900)
+        self.cats_origen = None   # (lat, lon) del primer fix: el 0 del mapa
+        self.cats_puerto = ""
 
         self.hist_altura = deque(maxlen=400)
         self.hist_vv = deque(maxlen=90)
@@ -295,6 +307,54 @@ class Estado(object):
             return False
         edad = self.edad_estado_s
         return edad is not None and edad < FRESCURA_TEST_S
+
+    # --- CATS ---
+
+    # Lo que tienen los dos y se cambia con el boton DATOS. La bateria NO:
+    # la de CATS es la suya, no la del cohete.
+    SOLAPADOS = ("altura_m", "vel_vertical_mps", "fase")
+
+    @property
+    def ver_cats(self):
+        return self.fuente == "CATS"
+
+    def dato(self, attr):
+        """Un dato para pintar: de CATS si se ha elegido CATS y es de los
+        que se solapan; si no, de nuestro paquete de vuelo."""
+        c = self.cats if (self.ver_cats and attr in self.SOLAPADOS) else \
+            self.paquete
+        return getattr(c, attr) if c is not None else None
+
+    def hist(self, nombre):
+        """Historia de 'altura', 'vv' o 'pista' de la fuente elegida."""
+        if self.ver_cats:
+            return {"altura": self.cats_hist_altura, "vv": self.cats_hist_vv,
+                    "pista": self.cats_pista}[nombre]
+        return {"altura": self.hist_altura, "vv": self.hist_vv,
+                "pista": self.pista}[nombre]
+
+    @property
+    def edad_cats_s(self):
+        return time.monotonic() - self.cats.t if self.cats else None
+
+    def encajar_cats(self, p):
+        previo = self.cats
+        self.cats = p
+        self.cats_recibidos += 1
+        self.cats_hist_altura.append(p.altura_m)
+        self.cats_hist_vv.append(p.vel_vertical_mps)
+        if p.gps_valido:
+            if self.cats_origen is None:
+                self.cats_origen = (p.lat, p.lon)
+                self.anotar("CATS: origen de su recorrido en %.5f, %.5f"
+                            % (p.lat, p.lon), CIAN)
+            self.cats_pista.append(ct.a_norte_este(p.lat, p.lon,
+                                                   *self.cats_origen))
+        if previo is None:
+            self.anotar("CATS: primer paquete (link %d, %s, %.1f V)"
+                        % (p.link, p.estado_nombre, p.bateria_v), CIAN)
+        elif p.estado != previo.estado:
+            self.anotar("CATS: estado -> %s" % p.estado_nombre, CIAN)
 
     def limpiar_historia(self):
         """Borra las graficas para que la simulacion empiece en blanco."""
@@ -1166,7 +1226,11 @@ class Simulador(object):
         b[30] = self.motivo
         b[31] = (0x01 if self.drogue else 0) | (0x02 if self.main else 0) \
             | (0x08 if self.camaras else 0)
-        b[1] = 6
+        b[1] = 7
+        # GNC v1.6: listo a los 2 s de encender (alineado, 0 AGL, GNSS)
+        if t >= 2.0:
+            b[24] |= 0x40 | 0x80
+            b[25] |= 0x40
         emer, apo, mai, mal = self._bits_emergencia(t, fase)
         b[31] |= (0x10 if emer else 0) | (0x20 if apo else 0) | \
             (0x40 if mai else 0) | (0x80 if mal else 0)
@@ -1347,9 +1411,12 @@ def boton(padre, texto, orden, color=VERDE, ancho=15, activo=True):
 class Estacion(object):
 
     def __init__(self, raiz, puerto=None, demo=False, demo_tierra=False,
-                 guardar=True, carpeta_datos=None, demo_emergencia=False):
+                 guardar=True, carpeta_datos=None, demo_emergencia=False,
+                 puerto_cats=None, sin_cats=False):
         self.raiz = raiz
         self.estado = Estado()
+        self.lector_cats = None
+        self.sim_cats = None
 
         # Guardado de todo lo que llega (grabador.py). Lo primero, para que
         # el registro quede entero desde la primera linea.
@@ -1406,6 +1473,13 @@ class Estacion(object):
             self.estado.anotar("modo demostracion: no hay radio", AMBAR)
         else:
             self._abrir_puerto(puerto)
+
+        # CATS: en la demo, fingido a partir del mismo vuelo
+        if demo and not sin_cats:
+            self.sim_cats = ct.SimuladorCats(self.sim)
+            self.estado.cats_puerto = "SIMULADO"
+        elif not sin_cats:
+            self._abrir_cats(puerto_cats)
 
         self.raiz.after(REFRESCO_MS, self._tic)
 
@@ -1508,6 +1582,9 @@ class Estacion(object):
         self.btn_bloqueo = boton(marco, "RAMPA: BLOQUEADO",
                                  self.alternar_bloqueo, VERDE, 18)
         self.btn_bloqueo.pack(side="left", padx=3)
+        self.btn_fuente = boton(marco, "DATOS: ASPID", self.alternar_fuente,
+                                VERDE, 21)
+        self.btn_fuente.pack(side="left", padx=3)
         self.btn_test = boton(marco, "MODO TEST", self.alternar_modo_test,
                               ROJO, 13)
         self.btn_test.pack(side="left", padx=3)
@@ -1563,7 +1640,49 @@ class Estacion(object):
         for dispositivo, descripcion in disponibles:
             if "CH340" in descripcion.upper():
                 return dispositivo
-        return disponibles[0][0] if disponibles else None
+        # Nunca el de la estacion de CATS (cats.py)
+        otros = [d for d, _ in disponibles if not ct.es_puerto_cats(d)]
+        return otros[0] if otros else None
+
+    def _abrir_cats(self, puerto):
+        if puerto is None:
+            puerto = ct.buscar_puerto()
+        if puerto is None:
+            self.estado.anotar("CATS: no hay estacion de CATS (se busca un "
+                               "ESP32 por USB; --cats COMx para forzarla)",
+                               VERDE_MED)
+            return
+        self.lector_cats = ct.LectorCats(puerto)
+        self.estado.cats_puerto = puerto
+        if self.lector_cats.arrancar():
+            self.estado.anotar("CATS: leyendo %s" % puerto, CIAN)
+        else:
+            self.estado.anotar("CATS: %s" % self.lector_cats.ultimo_error,
+                               ROJO)
+
+    def alternar_fuente(self):
+        """Boton DATOS: de quien son la altura, la velocidad vertical, la
+        fase y el recorrido que se pintan."""
+        e = self.estado
+        e.fuente = "ASPID" if e.ver_cats else "CATS"
+        e.anotar("altura, velocidad, fase y recorrido: %s"
+                 % ("de CATS" if e.ver_cats else "de nuestra avionica"),
+                 MAGENTA if e.ver_cats else CIAN)
+
+    def _ingerir_cats(self):
+        if self.sim_cats is not None:
+            for linea in self.sim_cats.lineas():
+                p = ct.decodificar(linea)
+                if p is not None:
+                    self._encajar_cats(p)
+        elif self.lector_cats is not None:
+            for p in self.lector_cats.vaciar():
+                self._encajar_cats(p)
+
+    def _encajar_cats(self, p):
+        self.estado.encajar_cats(p)
+        if self.grabador is not None:
+            self.grabador.cats(p)
 
     # --- Mando ---
 
@@ -2062,6 +2181,14 @@ class Estacion(object):
                      "pirotecnicos se disparan desde el panel que sustituye "
                      "al RECORRIDO")
 
+        if e.ver_cats:
+            edad = e.edad_cats_s
+            self.btn_fuente.configure(
+                text="DATOS: CATS" if (edad is not None and edad < 3.0)
+                else "DATOS: CATS (sin datos)", fg=MAGENTA)
+        else:
+            self.btn_fuente.configure(text="DATOS: ASPID", fg=VERDE)
+
         if e.modo_test_pedido:
             self.btn_test.configure(text="SALIR TEST", fg=AMBAR)
         else:
@@ -2150,6 +2277,7 @@ class Estacion(object):
     def _tic(self):
         try:
             self._ingerir()
+            self._ingerir_cats()
             self._pedir_estado_si_falta()
             self._mantener_modo_test()
             self._mantener_simulacion()
@@ -2241,6 +2369,8 @@ class Estacion(object):
             pass
         if self.puente is not None:
             self.puente.parar()
+        if self.lector_cats is not None:
+            self.lector_cats.parar()
         if self.grabador is not None:
             self.grabador.cerrar()
         self.raiz.destroy()
@@ -2257,6 +2387,11 @@ def main():
     ap.add_argument("--demo-emergencia", action="store_true",
                     help="como --demo pero la core se reinicia en vuelo a los "
                          "20 s y sigue en modo de emergencia")
+    ap.add_argument("--cats", metavar="PUERTO",
+                    help="puerto de la estacion de CATS (si no, se busca "
+                         "sola: un ESP32 por USB)")
+    ap.add_argument("--sin-cats", action="store_true",
+                    help="no lee ninguna estacion de CATS")
     ap.add_argument("--listar", action="store_true",
                     help="lista los puertos y sale")
     ap.add_argument("--sin-guardar", action="store_true",
@@ -2268,7 +2403,9 @@ def main():
 
     if args.listar:
         for dispositivo, descripcion in pte.puertos_disponibles():
-            print("%-8s %s" % (dispositivo, descripcion))
+            print("%-8s %s%s" % (dispositivo, descripcion,
+                                 "   <- CATS" if ct.es_puerto_cats(dispositivo)
+                                 else ""))
         return 0
 
     raiz = tk.Tk()
@@ -2276,7 +2413,8 @@ def main():
              demo=args.demo or args.demo_tierra or args.demo_emergencia,
              demo_tierra=args.demo_tierra, guardar=not args.sin_guardar,
              carpeta_datos=args.carpeta_datos,
-             demo_emergencia=args.demo_emergencia)
+             demo_emergencia=args.demo_emergencia,
+             puerto_cats=args.cats, sin_cats=args.sin_cats)
     raiz.mainloop()
     return 0
 

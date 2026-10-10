@@ -1,14 +1,14 @@
 /*
- * GNC del cohete (ASPID v1.5), generado con Simulink y copiado tal cual en
+ * GNC del cohete (ASPID v1.6), generado con Simulink y copiado tal cual en
  * third_party/aspid_gnc. Aquí solo está el pegamento: recoger los sensores
  * que llegan por CAN2 y ejecutar los tres modelos a su ritmo.
  *
  * Los tres modelos, en este orden (third_party/aspid_gnc/LEEME_INTEGRACION):
- *  1. nav            400 Hz  INS + EKF de 15 estados con las dos IMU, el
+ *  1. nav            416 Hz  INS + EKF de 15 estados con las dos IMU, el
  *                            barómetro y el GNSS: posición y velocidad NED,
  *                            actitud, sesgos y altura sobre el suelo.
- *  2. state_machine  400 Hz  estado del cohete y detección del despegue.
- *  3. gc              50 Hz  (uno de cada 8 ticks) fase de vuelo, apogeo
+ *  2. state_machine  416 Hz  estado del cohete y detección del despegue.
+ *  3. gc              52 Hz  (uno de cada 8 ticks) fase de vuelo, apogeo
  *                            previsto, mando del aerofreno y pirotecnia.
  *
  * Las salidas que mueven cosas NO salen de aquí: las recogen, en el bucle y
@@ -22,7 +22,7 @@
  * nuevo. Con el nivel fijo a 1 el filtro inyecta la misma medida muchas
  * veces, la covarianza colapsa y deja de aceptar medidas (lo dice la
  * entrega, y ya nos pasó con el GPS en la versión 1.1).
- *   barómetro    uno de cada GNC_BARO_DECIMATION ticks (66,7 Hz), si hay
+ *   barómetro    uno de cada GNC_BARO_DECIMATION ticks (69,3 Hz), si hay
  *                muestra nueva; la presión se mantiene SIEMPRE con la última
  *                porque el alineamiento la promedia en todos los ticks
  *   GNSS         cuando llega (10 Hz)
@@ -45,12 +45,26 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Ritmos del código generado: nav y máquina de estados a 400 Hz (dt fijo de
- * 2,5 ms dentro del modelo), guiado uno de cada 8 ticks (50 Hz) */
-#define GNC_RATE_HZ 400U
-#define GNC_PERIOD_US 2500U
+/* Ritmos del código generado (v1.6): nav y máquina de estados a 416 Hz (dt
+ * fijo de 2,404 ms dentro del modelo), guiado uno de cada 8 ticks (52 Hz).
+ * Hasta la v1.5 eran 400 y 50. El periodo NO es un número entero de us:
+ * GNC_PERIOD_US es el redondeo, solo para presupuestos y avisos; para tiempos
+ * usar GNC_PERIOD_S. La planificación va por ciclos de reloj (gnc.c). */
+#define GNC_RATE_HZ 416U
+#define GNC_PERIOD_US 2404U
+#define GNC_PERIOD_S (1.0 / (double)GNC_RATE_HZ)
 #define GNC_GC_DECIMATION 8U
-#define GNC_BARO_DECIMATION 6U /* 66,7 Hz, como el dataset de la entrega */
+#define GNC_BARO_DECIMATION 6U /* 69,3 Hz, como pide la entrega */
+
+/* El guiado manda el aerofreno en DESPLIEGUE AERODINÁMICO de 0 (paleta a ras
+ * de piel) a este tope (todo fuera): ver airbrake.h */
+#define GNC_ACTUADOR_MAX 0.90f
+
+/* nav_init_flags (v1.6): qué referencias de la rampa tiene el filtro */
+#define GNC_NAV_INIT_ALINEADO 0x01U  /* actitud y sesgos */
+#define GNC_NAV_INIT_BARO 0x02U      /* el 0 AGL */
+#define GNC_NAV_INIT_GNSS 0x04U      /* el (0,0,0) del NED: hace falta fix */
+#define GNC_NAV_INIT_DEGRADADO 0x08U /* navegando SIN haber alineado */
 
 /*
  * Si el bucle se atrasa, se dan los ticks que faltan uno por vuelta, hasta
@@ -64,7 +78,7 @@
  * (data_valid = 0, ver arriba). Hoy llegan cada ~5 ms. */
 #define GNC_IMU_MAX_HOLD_TICKS 8U /* 20 ms */
 
-/* Estados del cohete (state_machine v1.2 y v1.5). OJO: la v1.1 tenía READY en el 2
+/* Estados del cohete (state_machine desde la v1.2). OJO: la v1.1 tenía READY en el 2
  * y EN VUELO en el 3. Usar siempre estas constantes, nunca el número. */
 #define GNC_ESTADO_POWER_ON 0
 #define GNC_ESTADO_MANTENIMIENTO 1
@@ -137,6 +151,13 @@ typedef struct {
   float gnss_age_s;
   bool gnss_only;           /* en el descenso: solo GNSS, sin inercial */
   bool nav_valid;
+  /* v1.6: listo para volar, con las tres referencias de la rampa (actitud,
+   * 0 AGL y origen GNSS). nav_valid vale 1 también navegando degradado:
+   * para armar en la rampa, ESTE. */
+  bool nav_ready;
+  uint8_t nav_init_flags;   /* GNC_NAV_INIT_* */
+  uint32_t status_word;     /* gc_Y.status_word: todo el GNC en un entero
+                               (mapa en LEEME_INTEGRACION.txt) */
 
   /* Máquina de estados y guiado */
   int32_t rocket_state; /* GNC_ESTADO_* */
@@ -145,14 +166,15 @@ typedef struct {
   float apogee_pred_m;
   float apogee_error_m;
   float time_to_apogee_s;
-  float actuator_cmd; /* 0..1, extensión que pide el guiado */
+  float actuator_cmd; /* despliegue que pide el guiado: 0..GNC_ACTUADOR_MAX
+                         (v1.6; hasta la v1.5, 0..1 de extensión) */
   bool pyro_armed;    /* el guiado ha pasado de 100 m: pirotecnia armada */
   bool drogue_flag;   /* 1 s al entrar en DROGUE (ver despliegue.h) */
   bool main_flag;     /* 1 s al entrar en MAIN */
 
   /* Diagnóstico */
-  uint32_t steps;           /* ticks de nav + máquina de estados (400 Hz) */
-  uint32_t gc_steps;        /* pasos del guiado (50 Hz) */
+  uint32_t steps;           /* ticks de nav + máquina de estados (416 Hz) */
+  uint32_t gc_steps;        /* pasos del guiado (52 Hz) */
   uint32_t last_step_us;    /* lo que tardó el último tick (con guiado o no) */
   uint32_t max_step_us;     /* el peor hasta ahora */
   uint32_t max_gc_step_us;  /* el peor tick CON paso de guiado */
@@ -192,7 +214,7 @@ typedef struct {
 } gnc_data_t;
 
 /* Lo que exige nav.c para darse por alineado */
-#define GNC_ALIGN_STEPS 200U          /* 0,5 s a 400 Hz */
+#define GNC_ALIGN_STEPS 832U          /* 2 s a 416 Hz (v1.6; antes 200) */
 #define GNC_ALIGN_GYRO_MAX_DPS 4.0f   /* 0,0698 rad/s */
 #define GNC_ALIGN_ACCEL_TOL_MPS2 1.5f /* alrededor de 9,80665 */
 #define GNC_ALIGN_ATT_MAX_DEG 10.0f   /* gravedad medida vs actitud de rampa */

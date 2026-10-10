@@ -38,7 +38,9 @@ import struct
 import sys
 
 MAGIC = b"LEEMPI12"
-TIPOS = {"real32_T": "f", "real_T": "d", "uint8_T": "B", "int32_T": "i"}
+# "uint32" sin _T: asi viene status_word en el manifiesto de la v1.6
+TIPOS = {"real32_T": "f", "real_T": "d", "uint8_T": "B", "int32_T": "i",
+         "uint32_T": "I", "uint32": "I"}
 
 # modelo del manifiesto -> (prefijo del CSV, archivo de entradas, de salidas)
 MODELOS = {
@@ -66,7 +68,8 @@ def leer_manifiesto(ruta):
         if linea.startswith("SALIDAS"):
             seccion = "SALIDAS"
             continue
-        m = re.match(r"\s+(\S+)\s+(real32_T|real_T|uint8_T|int32_T)\s", linea)
+        m = re.match(r"\s+(\S+)\s+(real32_T|real_T|uint8_T|int32_T|"
+                     r"uint32_T|uint32)\s", linea)
         if m and seccion:
             out[modelo][seccion].append((m.group(1), TIPOS[m.group(2)]))
     return out

@@ -55,6 +55,8 @@
  *  21    wake ups reenviados (uint8 saturado)
  *  22-23 paquetes de radio que no se pudieron encolar (uint16 saturado)
  *  24    b0-2 fase de vuelo, b3-5 estado del cohete
+ *          b6 GNC alineado en la rampa   b7 0 AGL del barómetro enclavado
+ *             (nav_init_flags del GNC v1.6, versión 7)
  *  25    modo test (uplink.h)
  *          b0 activo
  *          b1-3 ultimo pirotecnico aceptado (0 ninguno, 1=1A 2=1B 3=2A 4=2B)
@@ -62,6 +64,10 @@
  *          b5 POSTVUELO: reiniciado tras un vuelo (emergencia.h): no toca
  *             la SD ni enciende las cámaras ni manda pirotécnicos de vuelo
  *             (versión 6)
+ *          b6 origen GNSS enclavado   b7 navegando SIN haber alineado
+ *             (degradado). Con b6 y b7 del byte 24 y b6 de este, el GNC
+ *             está LISTO PARA VOLAR (nav_ready): lo que hay que ver antes de
+ *             armar el iniciador (versión 7)
  *  26    segundos que le quedan al modo test (uint8 saturado)
  *  27    pirotecnicos aceptados desde el arranque (uint8 saturado)
  *  28    comandos de subida denegados (uint8 saturado): bien formados
@@ -123,7 +129,7 @@
 
 #define STATUS_PACKET_BYTES 32U
 #define STATUS_PACKET_MARCA 0xA5U
-#define STATUS_PACKET_VERSION 6U
+#define STATUS_PACKET_VERSION 7U
 
 /*
  * Muestrea la actividad de los buses. Llamar en cada vuelta del bucle

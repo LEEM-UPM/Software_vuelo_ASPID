@@ -272,8 +272,8 @@ Si el cohete está entero. Firmware: `App/status_packet.h` y `.c`.
 | 19‑20 | segundos encendido (uint16, satura a las 18 h) |
 | 21 | wake ups reenviados (uint8) |
 | 22‑23 | paquetes de radio que no se pudieron encolar (uint16) |
-| 24 | b0‑2 fase de vuelo · b3‑5 estado del cohete |
-| 25 | b0 **modo test activo** · b1‑3 último pirotécnico aceptado (0 ninguno, 1 1A, 2 1B, 3 2A, 4 2B) · b4 **SIMULANDO** · b5 **POSTVUELO** (v6) |
+| 24 | b0‑2 fase de vuelo · b3‑5 estado del cohete · b6 GNC alineado · b7 0 AGL enclavado (v7) |
+| 25 | b0 **modo test activo** · b1‑3 último pirotécnico aceptado (0 ninguno, 1 1A, 2 1B, 3 2A, 4 2B) · b4 **SIMULANDO** · b5 **POSTVUELO** (v6) · b6 origen GNSS enclavado · b7 navegando sin haber alineado (v7). Con 24.b6, 24.b7 y 25.b6, el GNC v1.6 está **LISTO PARA VOLAR** (`nav_ready`): es lo que hay que ver antes de armar el iniciador |
 | 26 | segundos que le quedan al modo test |
 | 27 | pirotécnicos aceptados desde el arranque (uint8) |
 | 28 | comandos de subida denegados (uint8) |

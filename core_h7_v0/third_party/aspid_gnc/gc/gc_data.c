@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'gc'.
  *
- * Model version                  : 3.17
+ * Model version                  : 3.46
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Mon Oct  5 22:54:41 2026
+ * C/C++ source code generated on : Sat Oct 10 21:00:39 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -88,22 +88,25 @@ const ConstP_gc_T gc_ConstP = {
    * Referenced by: '<Root>/GC_Logic'
    */
   {
-    0.5,
+    30.0,
     4.0,
-    0.02,
-    5.0,
+    2.0,
+    0.3425,
+    0.019230769230769232,
+    0.0,
     0.6,
     0.8,
     1.0,
     0.5,
     0.0,
-    1.0,
+    0.9,
     3.0769230769230766,
     45.0,
     1.0,
-    1200.0,
+    1500.0,
     1.05,
     30.0,
+    1.0,
     3000.0,
     1.0,
     2.0,
@@ -113,6 +116,8 @@ const ConstP_gc_T gc_ConstP = {
     5U,
     5.0,
     0.5,
+    15.0,
+    30.0,
     450.0,
     1.0,
     150.0,
@@ -120,7 +125,7 @@ const ConstP_gc_T gc_ConstP = {
     2.0,
     30.0,
     5.0,
-    250U
+    260U
   },
 
   /* Expression: gc_state0
@@ -145,7 +150,10 @@ const ConstP_gc_T gc_ConstP = {
     0U,
     -1.0,
     -1.0,
-    0U
+    0U,
+    0U,
+    0.0,
+    -1.0
   }
 };
 

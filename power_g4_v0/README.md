@@ -12,3 +12,16 @@
   contacto dejaba a power sorda a la pirotecnia hasta apagar el cohete.
 - Un fallo (HardFault...) o un `Error_Handler()` reinician la placa en vez de
   dejarla colgada.
+
+## Prueba de los pirotécnicos sin CAN (solo banco, sin cargas)
+
+`PYRO_PRUEBA_SIN_CAN` (`Drivers/Pyro/pyro.h`): nada más arrancar enciende los
+dos pares y los cuatro canales a la vez y los deja encendidos, sin CAN y sin
+apagado automático. Se compila aparte para no tocar el firmware de vuelo:
+
+```
+cmake --preset Debug -B build/PruebaPiros -DCMAKE_C_FLAGS=-DPYRO_PRUEBA_SIN_CAN=1
+cmake --build build/PruebaPiros
+```
+
+Para volver a volar, grabar el de `build/Debug`.

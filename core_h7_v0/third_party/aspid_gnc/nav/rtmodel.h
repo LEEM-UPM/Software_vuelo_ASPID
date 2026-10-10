@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'nav'.
  *
- * Model version                  : 1.25
+ * Model version                  : 1.51
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Tue Oct  6 00:35:37 2026
+ * C/C++ source code generated on : Sat Oct 10 20:59:19 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M

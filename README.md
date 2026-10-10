@@ -16,13 +16,13 @@ de tierra y de la estación de tierra.
 
 | Carpeta | Qué es | Herramientas |
 |---|---|---|
-| [`core_h7_v0/`](core_h7_v0) | Ordenador de vuelo (STM32H723): GNC ASPID v1.5 a 400 Hz, despliegue, aerofreno, modo de emergencia tras un reinicio en vuelo, telemetría, registro en SD y cámaras | CMake + STM32CubeCLT |
+| [`core_h7_v0/`](core_h7_v0) | Ordenador de vuelo (STM32H723): GNC ASPID v1.6 a 416 Hz, despliegue, aerofreno, modo de emergencia tras un reinicio en vuelo, telemetría, registro en SD y cámaras | CMake + STM32CubeCLT |
 | [`power_g4_v0/`](power_g4_v0) | Placa de potencia (STM32G473): pirotécnicos, continuidad y raíles | CMake + STM32CubeCLT |
 | [`sensores_avionica_g4_v0/`](sensores_avionica_g4_v0) | Aviónica (STM32G473): barómetros, IMU, magnetómetro, GPS, VN-100 y servo del aerofreno | CMake + STM32CubeCLT |
 | [`rf_g4_v0/`](rf_g4_v0) | Placa de radio (STM32G473 + SX1262): pone en el aire lo que manda el core y le pasa los comandos de tierra | CMake + STM32CubeCLT |
 | [`can_protocol/`](can_protocol) | Protocolo del bus CAN1 común: [`ICD.md`](can_protocol/ICD.md) y cabeceras | — |
 | [`puente_radio_tierra/`](puente_radio_tierra) | Puente USB ↔ LoRa de la estación (DX-PJ26: Blue Pill + DX-LR30) | Arduino IDE + RadioLib |
-| [`estacion_tierra/`](estacion_tierra) | Interfaz de la estación de tierra: telemetría, mando, registro | Python 3 |
+| [`estacion_tierra/`](estacion_tierra) | Interfaz de la estación de tierra: telemetría, mando con cerrojo de rampa, datos del CATS, registro | Python 3 |
 
 ## Compilar y grabar
 
@@ -64,18 +64,17 @@ bloquean el arranque**. Todos tienen que estar a 0 (en esta versión lo están):
 | core | `PIL_TEST_ENABLE` | `App/pil_test.h` |
 | core | `EMERGENCIA_PRUEBA` | `App/emergencia.h` |
 | core | `CAN_DRIVER_PRUEBA_BUS_OFF` | `Drivers/Can_driver/can_driver.h` |
-| core | `SD_BENCH_ENABLE`, `ASPID_DATA_PRUEBA`, `CAMARAS_PRUEBA_UART` | `App/` |
-| power | `PYRO_PRUEBA_ARRANQUE` | `Drivers/Pyro/pyro.h` |
+| core | `SD_BENCH_ENABLE`, `ASPID_DATA_PRUEBA`, `ASPID_DATA_PRUEBA_MUERTE`, `CAMARAS_PRUEBA_UART` | `App/` |
+| power | `PYRO_PRUEBA_ARRANQUE`, `PYRO_PRUEBA_SIN_CAN` | `Drivers/Pyro/pyro.h` |
 
 Lo pendiente de todas las placas está en
 [`core_h7_v0/PENDIENTES.txt`](core_h7_v0/PENDIENTES.txt).
 
 ## De dónde sale
 
-Copia del 2026-10-08 de los repositorios de trabajo de cada placa (core
+Copia del 2026-10-11 de los repositorios de trabajo de cada placa (core
 `Recepcion-datos-bus-avionica`, power `flight-software-develop`, aviónica
-`flight_software`, RF `aplication`), con lo que aún no estaba commiteado en
-ellos. Diferencias con esos repositorios:
+`flight_software`, RF `aplication`, commits del 2026-10-11). Diferencias con esos repositorios:
 
 - La estación de tierra está en `estacion_tierra/`; allí vivía en
   `core_h7_v0/tools/estacion`, y la documentación del core la sigue citando

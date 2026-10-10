@@ -10,17 +10,32 @@
  * UN SOLO CAMINO, igual que despliegue.c: airbrake_update() se llama en el
  * bucle principal justo después del GNC, y es lo ÚNICO que manda la trama
  * 0x200. Vuele de verdad o se esté simulando (gnc_playback.c), el mando sale
- * de aquí con las mismas reglas: por cada paso nuevo del guiado (50 Hz), una
+ * de aquí con las mismas reglas: por cada paso nuevo del guiado (52 Hz), una
  * trama.
  *
- *   - Solo con el cohete EN VUELO (GNC_ESTADO_EN_VUELO) se manda lo que pida el
- *     GNC. En cualquier otro estado se manda 0: en tierra, en la rampa o ya
- *     bajando, el aerofreno recogido pase lo que pase en el guiado.
+ *   - Se manda SIEMPRE lo que pida el GNC, en cualquier estado (desde la
+ *     v1.6, 2026-10-11). Hasta la v1.5 solo EN VUELO y en tierra un 0, pero
+ *     la v1.6 usa el aerofreno también fuera de EN VUELO y lo da por hecho:
+ *       - al terminar de alinearse, un BARRIDO (todo fuera y a ras de piel,
+ *         ~0,6 s, una vez por encendido), con el cohete EN LA RAMPA;
+ *       - en ERROR habiendo volado, todo fuera (fallo en vuelo).
+ *     En tierra sin nada de eso el guiado da 0 (a ras de piel). Las pruebas
+ *     de tierra (comandos 0x14 y 0x15) siguen mandando sobre él.
  *   - Tras un gnc_init() (vuelo o simulación nueva, o fin de simulación) el
- *     GNC vuelve a POWER_ON, así que la siguiente trama es un 0: el
- *     aerofreno se recoge solo al acabar una simulación, sin código aparte.
+ *     GNC vuelve a POWER_ON y su mando a 0: el aerofreno se recoge solo al
+ *     acabar una simulación, sin código aparte.
  *
- * Se manda a 50 Hz siempre, también en tierra (con 0): si la aviónica se
+ * EL MANDO DEL GNC NO ES EXTENSIÓN (v1.6): es despliegue aerodinámico de 0
+ * (paleta a ras de piel) a GNC_ACTUADOR_MAX = 0,90 (todo fuera). Aquí se
+ * pasa a la extensión de abajo dividiendo por 0,90, porque nuestra
+ * extensión ya empieza a ras de piel (AIRBRAKE_CERO_MM) y acaba en el tope.
+ * La entrega propone otra cuenta (recorrido = mando + 0,10 y un acos, con
+ * una manivela de 90 grados y 40 mm de carrera): es su modelo simplificado
+ * del mecanismo. Aquí se usa el de verdad (biela-manivela del PDF, 31,49 mm,
+ * 109 grados), con los mismos extremos: 0 a ras de piel, 0,90 al tope. El
+ * modo de emergencia publica su mando en la misma escala.
+ *
+ * Se manda a 52 Hz siempre, también en tierra (con 0): si la aviónica se
  * reinicia, el servo recibe su posición en 20 ms.
  *
  * === De la EXTENSIÓN al byte del servo ===
