@@ -34,6 +34,8 @@ import re
 import threading
 import time
 
+import paquete as pq
+
 try:
     import serial
     from serial.tools import list_ports
@@ -41,14 +43,25 @@ except ImportError:
     serial = None
     list_ports = None
 
-# Espressif (ESP32-S2 por USB nativo): así se encuentra el puerto solo
+# Así se encuentra el puerto solo. La estación es un ESP32-S2 por USB nativo,
+# pero el VID depende de la placa: 0x303A (Espressif) en las genéricas, y la
+# nuestra (2026-10-11, COM11) sale con 0x239A (Adafruit, PID 0x80AB).
 VID_ESPRESSIF = 0x303A
+VID_ADAFRUIT = 0x239A
+VIDS_CATS = (VID_ESPRESSIF, VID_ADAFRUIT)
 
 # USB CDC: cualquier valor sirve MENOS 1200 (reinicia en el bootloader)
 BAUDIOS = 115200
 
+# Sin recibir nada este tiempo, se vuelve a despertar (LectorCats._despertar)
+SILENCIO_S = 5.0
+
 ESTADOS = ("INVALID", "CALIBRATING", "READY", "THRUSTING", "COASTING",
            "DROGUE", "MAIN", "TOUCHDOWN")
+
+# Batería del CATS: LiPo 3S (manda 11,3-11,5 V, que solo cuadra con 3 celdas).
+# El porcentaje sale de la misma tabla que la nuestra (paquete.porcentaje_lipo).
+CELDAS_BATERIA = 3
 
 # Estado de CATS -> nuestra fase (paquete.FASES). CATS no distingue el control
 # del aerofreno ni el apogeo: COASTING es nuestro COAST y del DROGUE en
@@ -100,6 +113,13 @@ class PaqueteCats(object):
         return FASE_PROPIA.get(self.estado, -1)
 
     @property
+    def bateria_pct(self):
+        """Carga de SU batería (no la del cohete), 0 a 100; None sin dato."""
+        if self.bateria_v <= 0.0:
+            return None
+        return pq.porcentaje_lipo(self.bateria_v, CELDAS_BATERIA)
+
+    @property
     def gps_valido(self):
         # El firmware de CATS manda 0/0 sin fix (y así lo trata él)
         return not (self.lat == 0.0 and self.lon == 0.0)
@@ -128,11 +148,12 @@ def a_norte_este(lat, lon, lat0, lon0):
 
 
 def buscar_puerto():
-    """El primer puerto de Espressif (la estación de CATS), o None."""
+    """El primer puerto con un VID de VIDS_CATS (la estación de CATS), o
+    None."""
     if list_ports is None:
         return None
     for p in list_ports.comports():
-        if getattr(p, "vid", None) == VID_ESPRESSIF:
+        if getattr(p, "vid", None) in VIDS_CATS:
             return p.device
     return None
 
@@ -143,7 +164,7 @@ def es_puerto_cats(dispositivo):
         return False
     for p in list_ports.comports():
         if p.device == dispositivo:
-            return getattr(p, "vid", None) == VID_ESPRESSIF
+            return getattr(p, "vid", None) in VIDS_CATS
     return False
 
 
@@ -162,6 +183,7 @@ class LectorCats(object):
         self.lineas = 0        # todas, sean datos o no
         self.paquetes = 0
         self.descartados = 0   # cola llena
+        self.despertares = 0   # bajadas y subidas de DTR (_despertar)
         self._sp = None
         self._hilo = None
         self._parar = threading.Event()
@@ -176,8 +198,11 @@ class LectorCats(object):
         self._hilo.start()
         return True
 
-    def parar(self):
+    def parar(self, esperar=True):
+        """esperar=False: no bloquea, como en puente.Puente.parar()."""
         self._parar.set()
+        if not esperar:
+            return
         if self._hilo is not None:
             self._hilo.join(timeout=2.0)
         self._cerrar()
@@ -211,12 +236,33 @@ class LectorCats(object):
                 time.sleep(1.0)
         self._cerrar()
 
+    def _despertar(self):
+        """
+        La estación solo manda mientras ve subir DTR: así sabe que hay alguien
+        al otro lado. Al cerrar y volver a abrir el puerto, Windows no
+        siempre da esa subida, y se queda callada sin ningún error (medido el
+        2026-10-11 en COM11: 5 aperturas de 6 mudas, y las 5 despertaron
+        bajando y subiendo DTR). Saca su banner, que se ignora.
+        """
+        self._sp.dtr = False
+        time.sleep(0.1)
+        self._sp.dtr = True
+        self.despertares += 1
+
     def _leer(self):
         pendiente = b""
+        self._despertar()
+        ultimo = time.monotonic()
         while not self._parar.is_set():
             datos = self._sp.read(self._sp.in_waiting or 1)
             if not datos:
+                # Callada: o no le llega nada del cohete, o se ha dormido.
+                # Despertarla de más no hace daño.
+                if time.monotonic() - ultimo > SILENCIO_S:
+                    self._despertar()
+                    ultimo = time.monotonic()
                 continue
+            ultimo = time.monotonic()
             pendiente += datos
             while b"\n" in pendiente:
                 linea, pendiente = pendiente.split(b"\n", 1)
@@ -274,7 +320,7 @@ class SimuladorCats(object):
         norte, este = 0.05 * h, 0.02 * h         # deriva con la altura
         lat = self.LAT0 + norte / 111320.0
         lon = self.LON0 + este / (111320.0 * math.cos(math.radians(self.LAT0)))
-        return _linea_como_cats(1, t, estado, lat, lon, int(h), int(v), 8.1)
+        return _linea_como_cats(1, t, estado, lat, lon, int(h), int(v), 11.4)
 
 
 def _linea_como_cats(link, ts, estado, lat, lon, alt, vel, bateria):

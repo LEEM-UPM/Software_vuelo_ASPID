@@ -21,6 +21,7 @@ from widgets import (AMBAR, APAGADO, AZUL, CIAN, FONDO, MAGENTA, REJILLA, ROJO,
                      barra_segmentada, circulo_fase, fuente, lampara, rejilla,
                      traza)
 
+import cats as ct
 import paquete as pq
 
 
@@ -252,6 +253,9 @@ class PanelMedidores(Panel):
         ("BAT", "bateria_v", 9.0, 20.4, "V", VERDE),
         ("%BAT", "bateria_pct", 0.0, 100.0, "%", VERDE),
         ("SEN", None, -130.0, -20.0, "dBm", MAGENTA),
+        # La batería del CATS, que es SUYA: siempre de CATS, elija lo que
+        # elija el botón DATOS
+        ("CATS", None, 0.0, 100.0, "%", MAGENTA),
     )
 
     # Por debajo de esto la barra de carga se pinta en rojo
@@ -277,10 +281,12 @@ class PanelMedidores(Panel):
                 v = p.accel_modulo_g
             elif etq == "SEN" and e and e.trama is not None:
                 v = e.trama.rssi_dbm
+            elif etq == "CATS" and e is not None:
+                v = e.cats_bateria_pct   # promediada: ver ahí por qué
             else:
                 v = None
 
-            if (etq == "%BAT" and v is not None and
+            if (etq in ("%BAT", "CATS") and v is not None and
                     v < self.BATERIA_BAJA_PCT):
                 col = ROJO
 
@@ -300,7 +306,10 @@ class PanelMedidores(Panel):
             self.create_text(cx, y1 - 17, text=etq, fill=VERDE_MED,
                              font=fuente(8, True))
             self.create_text(cx, y1 - 5,
-                             text=_num(v, "%.0f" if abs(hi) > 50 else "%.1f"),
+                             # Sin decimales en las escalas grandes: el RSSI
+                             # (-130 a -20) con ".0" invadía la columna de al lado
+                             text=_num(v, "%.0f" if max(abs(lo), abs(hi)) > 50
+                                       else "%.1f"),
                              fill=col if v is not None else VERDE_OSC,
                              font=fuente(9, True))
 
@@ -383,25 +392,37 @@ class PanelVelocidad(Panel):
 
 
 class PanelFases(Panel):
-    """Las ocho fases de vuelo en fila. La activa se enciende."""
+    """
+    Las ocho fases de vuelo en fila. La activa se enciende. Con el botón
+    DATOS en CATS, los ocho estados de CATS (cats.ESTADOS) en magenta: no
+    son nuestras fases (no tiene control ni apogeo, sí calibración y READY),
+    así que se enseñan los suyos y no la traducción de cats.FASE_PROPIA.
+    """
 
     def pintar(self):
         e = self.estado
         x0, y0, x1, y1 = self.area()
-        activa = e.dato("fase") if e else None
+        if e is not None and e.ver_cats:
+            nombres = ct.ESTADOS
+            activa = e.cats.estado if e.cats is not None else -1
+            color = MAGENTA
+        else:
+            nombres = [pq.FASES[i] for i in range(len(pq.FASES))]
+            activa = e.dato("fase") if e else None
+            color = VERDE
         if activa is None:
             activa = -1
         _marca_cats(self, e, x1 - 4, y0 + 6, anchor="e")
         cy = (y0 + y1) / 2.0 - 4
-        n = len(pq.FASES)
+        n = len(nombres)
         paso = (x1 - x0) / float(n)
 
         for i in range(n):
             cx = x0 + paso * (i + 0.5)
-            nombre = pq.FASES[i]
-            circulo_fase(self, cx, cy, 13, nombre[0], i == activa)
+            nombre = nombres[i]
+            circulo_fase(self, cx, cy, 13, nombre[0], i == activa, color)
             self.create_text(cx, y1 - 5, text=nombre, fill=(
-                VERDE if i == activa else VERDE_OSC), font=fuente(7, i == activa))
+                color if i == activa else VERDE_OSC), font=fuente(7, i == activa))
             if i < n - 1:
                 self.create_line(cx + 14, cy, cx + paso - 14, cy,
                                  fill=VERDE_OSC if i >= activa else VERDE_MED)
@@ -674,11 +695,9 @@ class PanelMapa(Panel):
         p = e.paquete if e else None
         if e is not None and e.ver_cats:
             c = e.cats
-            if c is not None and pista:
-                n, ee = pista[-1]
+            if c is not None and c.gps_valido:
                 self.create_text(x0 + 2, y0 + 6, anchor="w",
-                                 text="N %+.0f  E %+.0f m   %.5f, %.5f"
-                                 % (n, ee, c.lat, c.lon),
+                                 text="LAT %.5f   LON %.5f" % (c.lat, c.lon),
                                  fill=MAGENTA, font=fuente(8))
             elif c is not None:
                 self.create_text(x0 + 2, y0 + 6, anchor="w",
@@ -776,10 +795,19 @@ class PanelSistema(Panel):
 
         self.create_text(x0, y, text="PIROTECNIA (continuidad)", anchor="w",
                          fill=VERDE_OSC, font=fuente(7))
+        # Los dos receptores de la estación de CATS, se elija lo que se elija
+        # en DATOS: magenta oyendo, rojo perdido, apagado si nunca oyó nada
+        xc = x1 - 124
+        self.create_text(xc - 6, y, text="CATS (antenas)", anchor="w",
+                         fill=VERDE_OSC, font=fuente(7))
         y += 14
         for i, etq in enumerate(pq.PIROS):
-            lampara(self, x0 + 6 + i * 52, y, bool(p and p.pirotecnia[i]), etq,
+            lampara(self, x0 + 6 + i * 46, y, bool(p and p.pirotecnia[i]), etq,
                     color=AMBAR)
+        for i, link in enumerate((1, 2)):
+            oye = e.cats_link(link) if e else None
+            lampara(self, xc + i * 64, y, oye is not None, "LINK %d" % link,
+                    color=MAGENTA if oye else ROJO)
         y += 20
 
         self.create_line(x0, y, x1, y, fill=REJILLA)

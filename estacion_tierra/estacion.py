@@ -63,6 +63,9 @@ SILENCIO_ENLACE_S = 2.0
 UMBRAL_CORTE = 32
 
 REFRESCO_MS = 80  # 12,5 Hz: más no aporta y come CPU
+CATS_LINK_S = 2.0  # sin paquetes por un link, su lámpara pasa a roja
+CATS_BATERIA_S = 30.0  # media de la tensión de CATS (Estado.cats_bateria_pct)
+PERIODO_BUSQUEDA_S = 2.0  # buscar el puente y CATS si no están (_vigilar_puertos)
 
 # Cerrojo de la rampa (boton RAMPA en el MANDO). La estacion arranca SIEMPRE
 # con el cerrojo puesto y hace falta esta contrasena para quitarlo. No es
@@ -161,6 +164,8 @@ class Estado(object):
         self.cats_hist_vv = deque(maxlen=90)
         self.cats_pista = deque(maxlen=900)
         self.cats_origen = None   # (lat, lon) del primer fix: el 0 del mapa
+        self.cats_bateria = deque()  # (t, V) de los últimos CATS_BATERIA_S
+        self.cats_link_t = {}  # link (1, 2) -> t del último paquete por él
         self.cats_puerto = ""
 
         self.hist_altura = deque(maxlen=400)
@@ -337,10 +342,38 @@ class Estado(object):
     def edad_cats_s(self):
         return time.monotonic() - self.cats.t if self.cats else None
 
+    @property
+    def cats_bateria_pct(self):
+        """
+        Carga de la batería de CATS con la MEDIA de los últimos
+        CATS_BATERIA_S. La tensión llega cuantizada a ~0,15 V (2026-10-11:
+        en 1587 paquetes solo 11,3, 11,5 y 11,6, nunca 11,4) y bailando entre
+        dos escalones; en la zona plana de la LiPo cada escalón son 15-20 %,
+        así que paquete a paquete la barra saltaba del 29 al 48 %. La media
+        de ese baile es estable, y la carga no cambia en 30 s.
+        """
+        if not self.cats_bateria:
+            return None
+        v = sum(x for _, x in self.cats_bateria) / len(self.cats_bateria)
+        return pq.porcentaje_lipo(v, ct.CELDAS_BATERIA) if v > 0.0 else None
+
+    def cats_link(self, link):
+        """Un receptor de la estación de CATS: None si no ha oído nada en
+        esta sesión, True si oyó algo hace menos de CATS_LINK_S, False si
+        lo perdió."""
+        t = self.cats_link_t.get(link)
+        if t is None:
+            return None
+        return time.monotonic() - t < CATS_LINK_S
+
     def encajar_cats(self, p):
         previo = self.cats
         self.cats = p
         self.cats_recibidos += 1
+        self.cats_bateria.append((p.t, p.bateria_v))
+        self.cats_link_t[p.link] = p.t
+        while p.t - self.cats_bateria[0][0] > CATS_BATERIA_S:
+            self.cats_bateria.popleft()
         self.cats_hist_altura.append(p.altura_m)
         self.cats_hist_vv.append(p.vel_vertical_mps)
         if p.gps_valido:
@@ -1408,6 +1441,17 @@ def boton(padre, texto, orden, color=VERDE, ancho=15, activo=True):
     return b
 
 
+def _es_ch340(descripcion):
+    return "CH340" in (descripcion or "").upper()
+
+
+def _descripcion(dispositivo):
+    for d, descripcion in pte.puertos_disponibles():
+        if d == dispositivo:
+            return descripcion
+    return ""
+
+
 class Estacion(object):
 
     def __init__(self, raiz, puerto=None, demo=False, demo_tierra=False,
@@ -1417,6 +1461,12 @@ class Estacion(object):
         self.estado = Estado()
         self.lector_cats = None
         self.sim_cats = None
+        # Puertos dados con --puerto / --cats: esos y ningún otro. Si no, se
+        # buscan solos, también DESPUÉS de arrancar (_vigilar_puertos)
+        self._puerto_forzado = puerto
+        self._cats_forzado = puerto_cats
+        self._sin_cats = sin_cats
+        self._proxima_busqueda = 0.0
 
         # Guardado de todo lo que llega (grabador.py). Lo primero, para que
         # el registro quede entero desde la primera linea.
@@ -1463,6 +1513,20 @@ class Estacion(object):
         raiz.configure(bg=FONDO)
         raiz.geometry("1500x900")
         raiz.minsize(1180, 740)
+        # Maximizada: Windows la ajusta a la pantalla MENOS la barra de
+        # tareas, que si no tapa la fila de botones de abajo
+        try:
+            raiz.state("zoomed")              # Windows
+        except tk.TclError:
+            try:
+                raiz.attributes("-zoomed", True)  # Linux
+            except tk.TclError:
+                pass
+        # F11: pantalla completa (sin barra de título ni de tareas); Esc sale
+        raiz.bind("<F11>", lambda _e: raiz.attributes(
+            "-fullscreen", not raiz.attributes("-fullscreen")))
+        raiz.bind("<Escape>", lambda _e: raiz.attributes("-fullscreen",
+                                                        False))
         raiz.protocol("WM_DELETE_WINDOW", self.cerrar)
 
         self._construir()
@@ -1487,11 +1551,14 @@ class Estacion(object):
 
     def _construir(self):
         r = self.raiz
-        for c, peso, minimo in ((0, 0, 215), (1, 3, 240), (2, 2, 210),
+        for c, peso, minimo in ((0, 0, 245), (1, 3, 240), (2, 2, 210),
                                 (3, 0, 345)):
             r.columnconfigure(c, weight=peso, minsize=minimo)
+        # Las filas 4 y 5 crecen con lo que sobre; su mínimo es pequeño para
+        # que todo quepa en un portátil de 1080 al 125 % (793 px útiles
+        # maximizada): con 210 y 150 la fila de botones quedaba fuera
         for f, peso, minimo in ((0, 0, 54), (1, 0, 150), (2, 0, 92),
-                                (3, 0, 58), (4, 2, 210), (5, 1, 150),
+                                (3, 0, 58), (4, 2, 160), (5, 1, 110),
                                 (6, 0, 46), (7, 0, 62)):
             r.rowconfigure(f, weight=peso, minsize=minimo)
 
@@ -1618,9 +1685,15 @@ class Estacion(object):
         if puerto is None:
             puerto = self._buscar_puerto()
         if puerto is None:
-            self.estado.anotar("no se encontro ningun puerto serie", ROJO)
+            self.estado.anotar("puente: no hay ningun puerto serie; se sigue "
+                               "buscando (enchufalo cuando quieras)", AMBAR)
             self.estado.nombre_puerto = "NINGUNO"
             return
+        self._conectar_puente(puerto)
+
+    def _conectar_puente(self, puerto):
+        if self.puente is not None:
+            self.puente.parar(esperar=False)
         self.puente = pte.Puente(puerto)
         self.estado.nombre_puerto = puerto
         if self.puente.arrancar():
@@ -1638,7 +1711,7 @@ class Estacion(object):
         """
         disponibles = pte.puertos_disponibles()
         for dispositivo, descripcion in disponibles:
-            if "CH340" in descripcion.upper():
+            if _es_ch340(descripcion):
                 return dispositivo
         # Nunca el de la estacion de CATS (cats.py)
         otros = [d for d, _ in disponibles if not ct.es_puerto_cats(d)]
@@ -1648,10 +1721,15 @@ class Estacion(object):
         if puerto is None:
             puerto = ct.buscar_puerto()
         if puerto is None:
-            self.estado.anotar("CATS: no hay estacion de CATS (se busca un "
-                               "ESP32 por USB; --cats COMx para forzarla)",
-                               VERDE_MED)
+            self.estado.anotar("CATS: no hay estacion de CATS; se sigue "
+                               "buscando un ESP32 por USB (--cats COMx para "
+                               "forzarla)", VERDE_MED)
             return
+        self._conectar_cats(puerto)
+
+    def _conectar_cats(self, puerto):
+        if self.lector_cats is not None:
+            self.lector_cats.parar(esperar=False)
         self.lector_cats = ct.LectorCats(puerto)
         self.estado.cats_puerto = puerto
         if self.lector_cats.arrancar():
@@ -1659,6 +1737,47 @@ class Estacion(object):
         else:
             self.estado.anotar("CATS: %s" % self.lector_cats.ultimo_error,
                                ROJO)
+
+    def _vigilar_puertos(self):
+        """
+        Cada PERIODO_BUSQUEDA_S, lo que no se encontró al arrancar: el puente
+        o la estación de CATS enchufados más tarde, o con otro COM al volver a
+        enchufarlos. Solo con los puertos que se buscan solos; uno forzado ya
+        lo reintenta su propio lector.
+
+        Del puente se cambia si el que hay está desenchufado, o si se cogió
+        uno que no es un CH340 (a falta de otro) y ahora hay un CH340. Uno
+        abierto que funciona no se toca.
+        """
+        if self.demo:
+            return
+        ahora = time.monotonic()
+        if ahora < self._proxima_busqueda:
+            return
+        self._proxima_busqueda = ahora + PERIODO_BUSQUEDA_S
+
+        actual = self.puente
+        if self._puerto_forzado is None and not (
+                actual is not None and actual.conectado and
+                _es_ch340(_descripcion(actual.puerto))):
+            nuevo = self._buscar_puerto()
+            if actual is None:
+                cambiar = nuevo is not None
+            else:
+                cambiar = (nuevo is not None and nuevo != actual.puerto and
+                           (not actual.conectado or
+                            _es_ch340(_descripcion(nuevo))))
+            if cambiar:
+                self.estado.anotar("puente: encontrado en %s" % nuevo, CIAN)
+                self._conectar_puente(nuevo)
+
+        if not self._sin_cats and self._cats_forzado is None:
+            lc = self.lector_cats
+            if lc is None or not lc.conectado:
+                nuevo = ct.buscar_puerto()
+                if nuevo is not None and (lc is None or nuevo != lc.puerto):
+                    self.estado.anotar("CATS: encontrada en %s" % nuevo, CIAN)
+                    self._conectar_cats(nuevo)
 
     def alternar_fuente(self):
         """Boton DATOS: de quien son la altura, la velocidad vertical, la
@@ -2276,6 +2395,7 @@ class Estacion(object):
 
     def _tic(self):
         try:
+            self._vigilar_puertos()
             self._ingerir()
             self._ingerir_cats()
             self._pedir_estado_si_falta()

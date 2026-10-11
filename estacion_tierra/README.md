@@ -15,6 +15,10 @@ python estacion.py --cats COM12    fuerza el puerto de la estación de CATS
 python estacion.py --sin-cats      no lee CATS
 ```
 
+**No hace falta enchufar nada antes de abrirla.** Si el puente o la estación de CATS
+no están al arrancar (o se desenchufan y vuelven con otro COM), se siguen buscando
+cada 2 s y se conectan solos. Con `--puerto` / `--cats` se usa ese puerto y ningún otro.
+
 **Todo lo que llega se guarda** en `Escritorio/LEEM_datos/<fecha_hora>/`,
 una carpeta por cada vez que se abre la estación. Ver
 [Datos guardados](#datos-guardados).
@@ -205,7 +209,7 @@ un ordenador de vuelo comercial con su propia radio (2,4 GHz) y su propia
 estación de tierra. Esa estación se enchufa al PC por USB y la interfaz la
 lee a la vez que nuestro puente (`cats.py`).
 
-**Conexión.** Se busca sola: es un ESP32-S2 (USB de Espressif, VID 0x303A).
+**Conexión.** Se busca sola: es un ESP32-S2 por USB, con VID 0x303A (Espressif) o 0x239A (Adafruit, el de nuestra estación); ver `cats.VIDS_CATS`.
 Si no la encuentra lo dice en el registro y sigue sin ella; `--cats COMx` la
 fuerza. Es un puerto USB CDC: la velocidad da igual, **pero no abrirlo nunca a
 1200 baudios**, que la reinicia en su bootloader. La búsqueda del puente

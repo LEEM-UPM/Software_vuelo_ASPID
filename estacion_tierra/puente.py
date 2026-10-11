@@ -128,8 +128,12 @@ class Puente(object):
         self._hilo.start()
         return True
 
-    def parar(self):
+    def parar(self, esperar=True):
+        """esperar=False: no bloquea (para cambiar de puerto desde la
+        interfaz); el hilo cierra el puerto él solo al salir del bucle."""
         self._parar.set()
+        if not esperar:
+            return
         if self._hilo is not None:
             self._hilo.join(timeout=2.0)
         self._cerrar()
