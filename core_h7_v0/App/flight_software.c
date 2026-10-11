@@ -10,6 +10,7 @@
 #include "gnc.h"
 #include "airbrake.h"
 #include "aspid_data.h"
+#include "boton_memoria.h"
 #include "camaras.h"
 #include "gnc_playback.h"
 #include "pil_test.h"
@@ -92,6 +93,16 @@ static bool _pitido_de_vuelo(emergencia_modo_t modo) {
   }
   return (gnc_get_data()->flight_phase != GNC_FASE_IDLE) ||
          rf_telemetry_lanzamiento_visto();
+}
+
+/*
+ * ¿Se puede borrar la memoria de vuelo con el botón (boton_memoria.h)? En
+ * tierra sin vuelo en marcha (lo contrario del pitido de vuelo), o tras un
+ * vuelo (POSTVUELO), que es justo cuando hace falta para empezar de cero.
+ * Nunca en el modo de emergencia.
+ */
+static bool _boton_permitido(emergencia_modo_t modo) {
+  return (modo == EMERGENCIA_POSTVUELO) || !_pitido_de_vuelo(modo);
 }
 
 int main(void) {
@@ -289,6 +300,9 @@ int main(void) {
 
     /* ---- Memoria de vuelo: lo que cambie, a la flash (emergencia.h) ---- */
     emergencia_vigilar();
+
+    /* ---- Botón BUTTON1: borrar la memoria de vuelo, solo en tierra ---- */
+    boton_memoria_update(_boton_permitido(modo));
 
     /* ---- Gestión del resto de placas (continuidad de power a 1 Hz...) ---- */
     sys_update(&state);

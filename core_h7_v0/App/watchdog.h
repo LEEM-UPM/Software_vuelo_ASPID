@@ -23,4 +23,10 @@
 void watchdog_iniciar(void);
 void watchdog_refrescar(void);
 
+/* Lleva el plazo al máximo (~32 s) y refresca: para algo que bloquea más de
+ * WATCHDOG_MS a propósito y termina en un reset (boton_memoria.c). No se puede
+ * volver a acortar sin un watchdog_iniciar(). El plazo sobrevive al reset por
+ * software: el IWDG solo se para con un encendido. */
+void watchdog_alargar(void);
+
 #endif /* WATCHDOG_H */

@@ -242,10 +242,8 @@ bool memoria_vuelo_guardar(const memoria_vuelo_t *m) {
   return true;
 }
 
-void memoria_vuelo_mantener(void) {
-  if (!s_disponible || (s_siguiente < MEMORIA_VUELO_BORRAR_DESDE)) {
-    return;
-  }
+/* Borra el sector entero: 1-2 s con todo el chip parado */
+static bool _borrar_sector(void) {
   FLASH_EraseInitTypeDef e = {0};
   e.TypeErase = FLASH_TYPEERASE_SECTORS;
   e.Banks = FLASH_BANK_1;
@@ -266,13 +264,30 @@ void memoria_vuelo_mantener(void) {
                                (int32_t)MEMORIA_VUELO_SECTOR_BYTES);
   if (st != HAL_OK) {
     s_fallos++;
-    return;
+    return false;
   }
   s_borrados++;
   s_siguiente = 0U;
-  if (s_hay) {
+  return true;
+}
+
+void memoria_vuelo_mantener(void) {
+  if (!s_disponible || (s_siguiente < MEMORIA_VUELO_BORRAR_DESDE)) {
+    return;
+  }
+  if (_borrar_sector() && s_hay) {
     (void)memoria_vuelo_guardar(&s_ultimo); /* que no se pierda el estado */
   }
+}
+
+bool memoria_vuelo_borrar(void) {
+  if (!s_disponible || !_borrar_sector()) {
+    return false;
+  }
+  s_hay = false;
+  s_secuencia = 0U;
+  memset(&s_ultimo, 0, sizeof(s_ultimo));
+  return true;
 }
 
 uint32_t memoria_vuelo_usados(void) { return s_siguiente; }

@@ -75,6 +75,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/baro_alt.c
     App/emergencia.c
     App/watchdog.c
+    App/boton_memoria.c
     App/camaras.c
     # Drivers propios
     Drivers/Buzzer/buzzer.c

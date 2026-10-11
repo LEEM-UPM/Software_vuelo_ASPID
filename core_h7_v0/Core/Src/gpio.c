@@ -62,7 +62,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, LED_1_Pin|CAN2_STB_Pin|CAN1_STB_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, BUTTON2_Pin|BUTTON1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BUTTON2_GPIO_Port, BUTTON2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : ALARM_Pin */
   GPIO_InitStruct.Pin = ALARM_Pin;
@@ -96,12 +96,18 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BUTTON2_Pin BUTTON1_Pin */
-  GPIO_InitStruct.Pin = BUTTON2_Pin|BUTTON1_Pin;
+  /*Configure GPIO pin : BUTTON2_Pin */
+  GPIO_InitStruct.Pin = BUTTON2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+  HAL_GPIO_Init(BUTTON2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BUTTON1_Pin */
+  GPIO_InitStruct.Pin = BUTTON1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BUTTON1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SD1_CD_Pin */
   GPIO_InitStruct.Pin = SD1_CD_Pin;

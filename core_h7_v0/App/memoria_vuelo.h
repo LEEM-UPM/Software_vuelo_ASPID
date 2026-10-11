@@ -100,6 +100,11 @@ bool memoria_vuelo_guardar(const memoria_vuelo_t *m);
  * lo borra (1-2 s bloqueado) y vuelve a escribir el último registro. */
 void memoria_vuelo_mantener(void);
 
+/* SOLO EN TIERRA: borra el sector entero (1-2 s bloqueado) SIN conservar el
+ * último registro, ni siquiera el número de vuelo. Es lo que hace el botón
+ * BUTTON1 (boton_memoria.h). false si no se pudo. */
+bool memoria_vuelo_borrar(void);
+
 /* Para la consola */
 uint32_t memoria_vuelo_usados(void);    /* registros ocupados */
 uint32_t memoria_vuelo_escritos(void);  /* escritos desde el arranque */
