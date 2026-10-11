@@ -123,6 +123,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
   }
 }
 
+/* The HAL aborts a reception on overrun/noise/framing errors; re-arm it. */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+  if (huart == &hlpuart1) {
+    GPS_OnRxError(&gps);
+  }
+}
+
 /* VectorNav's byte-count-framed reception (USART2): fires once per
  * hunted-and-confirmed sync byte AND once per completed packet -- see
  * VectorNav_OnRxCplt(), which only marks vn.rxPacketReady on the latter. */

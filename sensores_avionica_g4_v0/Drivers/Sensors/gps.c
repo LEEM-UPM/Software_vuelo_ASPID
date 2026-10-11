@@ -380,11 +380,31 @@ uint8_t GPS_Read(GPS_t *gps, GPS_Data_t *data) {
   return parsed;
 }
 
+/* After GPS_Init() the module is already streaming at GPS_UART_BAUD, and
+ * nothing reads the UART until reception is armed, so ORE is set by then.
+ * Arming with a pending error makes the error interrupt fire inside
+ * HAL_UARTEx_ReceiveToIdle_IT(): the HAL aborts the reception and the call
+ * returns HAL_ERROR. Clear the flags and drop the stale byte first. */
+static void GPS_ClearRxErrors(GPS_t *gps) {
+  __HAL_UART_CLEAR_FLAG(gps->huart, UART_CLEAR_OREF | UART_CLEAR_NEF |
+                                        UART_CLEAR_FEF | UART_CLEAR_PEF);
+  __HAL_UART_SEND_REQ(gps->huart, UART_RXDATA_FLUSH_REQUEST);
+}
+
 bool GPS_StartAsyncReceive(GPS_t *gps) {
   gps->rxNextBuf = 0;
   gps->rxReadyLen = 0;
+  GPS_ClearRxErrors(gps);
   return HAL_UARTEx_ReceiveToIdle_IT(gps->huart, gps->rxBuf[0],
                                       GPS_ASYNC_RX_BUF_LEN) == HAL_OK;
+}
+
+void GPS_OnRxError(GPS_t *gps) {
+  gps->rxErrors++;
+  GPS_ClearRxErrors(gps);
+  /* The HAL has already ended the reception; the partial burst is lost. */
+  (void)HAL_UARTEx_ReceiveToIdle_IT(gps->huart, gps->rxBuf[gps->rxNextBuf],
+                                     GPS_ASYNC_RX_BUF_LEN);
 }
 
 void GPS_OnRxEvent(GPS_t *gps, uint16_t size, uint32_t timestampUs) {

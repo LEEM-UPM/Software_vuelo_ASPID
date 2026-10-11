@@ -136,6 +136,7 @@ typedef struct {
   volatile uint8_t rxReadyBuf;  /* which rxBuf[] holds a completed one */
   volatile uint16_t rxReadyLen; /* its length; 0 = nothing waiting */
   volatile uint32_t rxReadyUs;  /* timestamp passed to GPS_OnRxEvent() */
+  volatile uint32_t rxErrors;   /* UART errors (overrun, noise...) recovered */
 } GPS_t;
 
 /* === API ================================================================== */
@@ -174,6 +175,11 @@ bool GPS_StartAsyncReceive(GPS_t *gps);
  * the current timestamp (it becomes the sampleUs of what is parsed from this
  * burst). Re-arms reception into the other internal buffer. */
 void GPS_OnRxEvent(GPS_t *gps, uint16_t size, uint32_t timestampUs);
+
+/* Call from HAL_UART_ErrorCallback() when it fires for gps->huart. An overrun
+ * (or noise/framing error) makes the HAL abort the reception, and without
+ * this it would never be re-armed. Re-arms it and counts gps->rxErrors. */
+void GPS_OnRxError(GPS_t *gps);
 
 /* Non-blocking: parses whatever GPS_OnRxEvent() most recently marked ready
  * (no-op otherwise) into *data. Returns GPS_PARSED_* flags. */
