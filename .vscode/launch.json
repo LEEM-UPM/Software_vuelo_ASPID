@@ -12,11 +12,14 @@
             "cwd": "${workspaceFolder}/core_h7_v0",
             "preLaunchTask": "ASPID: preparar core",
             "preBuild": "",
-            "deviceName": "STM32H723ZETx",
+            "deviceName": "STM32H723ZET6",
             "deviceCore": "Cortex-M7",
             "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32H723.svd",
             "runEntry": "main",
             "serverVerify": true,
+            // Ruta sin acentos: el ST-LINK_gdbserver no sabe abrir el programador
+            // del bundle (%LOCALAPPDATA%, dentro de C:/Users/Víctor) y la grabación falla.
+            "serverCubeProgPath": "C:/ST/STM32CubeCLT_1.19.0/STM32CubeProgrammer/bin",
             "imagesAndSymbols": [
                 {
                     "imageFileName": "${workspaceFolder}/core_h7_v0/build/Debug/core_h7_v0.elf",
@@ -32,11 +35,14 @@
             "cwd": "${workspaceFolder}/power_g4_v0",
             "preLaunchTask": "ASPID: preparar power",
             "preBuild": "",
-            "deviceName": "STM32G473CETx",
+            "deviceName": "STM32G473CET6",
             "deviceCore": "Cortex-M4",
             "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
             "runEntry": "main",
             "serverVerify": true,
+            // Ruta sin acentos: el ST-LINK_gdbserver no sabe abrir el programador
+            // del bundle (%LOCALAPPDATA%, dentro de C:/Users/Víctor) y la grabación falla.
+            "serverCubeProgPath": "C:/ST/STM32CubeCLT_1.19.0/STM32CubeProgrammer/bin",
             "imagesAndSymbols": [
                 {
                     "imageFileName": "${workspaceFolder}/power_g4_v0/build/Debug/Power_MK2.elf",
@@ -52,11 +58,14 @@
             "cwd": "${workspaceFolder}/sensores_avionica_g4_v0",
             "preLaunchTask": "ASPID: preparar avionica",
             "preBuild": "",
-            "deviceName": "STM32G473CETx",
+            "deviceName": "STM32G473CET6",
             "deviceCore": "Cortex-M4",
             "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
             "runEntry": "main",
             "serverVerify": true,
+            // Ruta sin acentos: el ST-LINK_gdbserver no sabe abrir el programador
+            // del bundle (%LOCALAPPDATA%, dentro de C:/Users/Víctor) y la grabación falla.
+            "serverCubeProgPath": "C:/ST/STM32CubeCLT_1.19.0/STM32CubeProgrammer/bin",
             "imagesAndSymbols": [
                 {
                     "imageFileName": "${workspaceFolder}/sensores_avionica_g4_v0/build/Debug/sensores_avionica_g4_v0.elf",
@@ -72,11 +81,14 @@
             "cwd": "${workspaceFolder}/rf_g4_v0",
             "preLaunchTask": "ASPID: preparar rf",
             "preBuild": "",
-            "deviceName": "STM32G473CETx",
+            "deviceName": "STM32G473CET6",
             "deviceCore": "Cortex-M4",
             "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
             "runEntry": "main",
             "serverVerify": true,
+            // Ruta sin acentos: el ST-LINK_gdbserver no sabe abrir el programador
+            // del bundle (%LOCALAPPDATA%, dentro de C:/Users/Víctor) y la grabación falla.
+            "serverCubeProgPath": "C:/ST/STM32CubeCLT_1.19.0/STM32CubeProgrammer/bin",
             "imagesAndSymbols": [
                 {
                     "imageFileName": "${workspaceFolder}/rf_g4_v0/build/Debug/rf_g4_v0.elf",
