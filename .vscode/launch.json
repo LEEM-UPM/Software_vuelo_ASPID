@@ -1,0 +1,88 @@
+{
+    // Una configuración por placa. Antes de lanzar, la tarea "ASPID: preparar <placa>"
+    // compila (preset Debug) y comprueba el Device ID; si la placa conectada no es
+    // la correcta, la tarea falla y VS Code pregunta antes de seguir: NO continuar.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "ASPID: core (STM32H723)",
+            "origin": "manual",
+            "cwd": "${workspaceFolder}/core_h7_v0",
+            "preLaunchTask": "ASPID: preparar core",
+            "preBuild": "",
+            "deviceName": "STM32H723ZETx",
+            "deviceCore": "Cortex-M7",
+            "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32H723.svd",
+            "runEntry": "main",
+            "serverVerify": true,
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/core_h7_v0/build/Debug/core_h7_v0.elf",
+                    "symbolFileName": "${workspaceFolder}/core_h7_v0/build/Debug/core_h7_v0.elf"
+                }
+            ]
+        },
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "ASPID: power (STM32G473)",
+            "origin": "manual",
+            "cwd": "${workspaceFolder}/power_g4_v0",
+            "preLaunchTask": "ASPID: preparar power",
+            "preBuild": "",
+            "deviceName": "STM32G473CETx",
+            "deviceCore": "Cortex-M4",
+            "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
+            "runEntry": "main",
+            "serverVerify": true,
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/power_g4_v0/build/Debug/Power_MK2.elf",
+                    "symbolFileName": "${workspaceFolder}/power_g4_v0/build/Debug/Power_MK2.elf"
+                }
+            ]
+        },
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "ASPID: avionica (STM32G473)",
+            "origin": "manual",
+            "cwd": "${workspaceFolder}/sensores_avionica_g4_v0",
+            "preLaunchTask": "ASPID: preparar avionica",
+            "preBuild": "",
+            "deviceName": "STM32G473CETx",
+            "deviceCore": "Cortex-M4",
+            "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
+            "runEntry": "main",
+            "serverVerify": true,
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/sensores_avionica_g4_v0/build/Debug/sensores_avionica_g4_v0.elf",
+                    "symbolFileName": "${workspaceFolder}/sensores_avionica_g4_v0/build/Debug/sensores_avionica_g4_v0.elf"
+                }
+            ]
+        },
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "ASPID: rf (STM32G473)",
+            "origin": "manual",
+            "cwd": "${workspaceFolder}/rf_g4_v0",
+            "preLaunchTask": "ASPID: preparar rf",
+            "preBuild": "",
+            "deviceName": "STM32G473CETx",
+            "deviceCore": "Cortex-M4",
+            "svdPath": "C:/ST/STM32CubeCLT_1.19.0/STMicroelectronics_CMSIS_SVD/STM32G473.svd",
+            "runEntry": "main",
+            "serverVerify": true,
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/rf_g4_v0/build/Debug/rf_g4_v0.elf",
+                    "symbolFileName": "${workspaceFolder}/rf_g4_v0/build/Debug/rf_g4_v0.elf"
+                }
+            ]
+        }
+    ]
+}

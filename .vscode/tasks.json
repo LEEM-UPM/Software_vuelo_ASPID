@@ -1,0 +1,44 @@
+{
+    // Tareas previas a la sesión de debug: compilan la placa y comprueban
+    // con el ST-Link que la placa conectada es la correcta (Device ID).
+    // La grabación la hace luego el ST-LINK_gdbserver al lanzar el debug.
+    "version": "2.0.0",
+    "windows": {
+        "options": {
+            "shell": {
+                "executable": "powershell.exe",
+                "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+            }
+        }
+    },
+    "tasks": [
+        {
+            "label": "ASPID: preparar core",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/flashear.ps1' core -SinGrabar",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "ASPID: preparar power",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/flashear.ps1' power -SinGrabar",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "ASPID: preparar avionica",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/flashear.ps1' avionica -SinGrabar",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "ASPID: preparar rf",
+            "type": "shell",
+            "command": "& '${workspaceFolder}/flashear.ps1' rf -SinGrabar",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}
