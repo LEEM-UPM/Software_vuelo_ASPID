@@ -80,7 +80,7 @@
 
 /* El 0 % del aerofreno: esto más allá del tope de dentro. El 100 % no cambia
  * (AIRBRAKE_X_MAX_MM): la carrera útil es la de los topes menos esto. */
-#define AIRBRAKE_CERO_MM 4.0f
+#define AIRBRAKE_CERO_MM 5.0f
 
 /*
  * --- Servo: los dos extremos, MEDIDOS en el banco el 2026-10-04 ---

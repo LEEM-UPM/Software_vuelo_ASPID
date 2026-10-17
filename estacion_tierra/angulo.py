@@ -90,7 +90,7 @@ class PanelAngulo(tk.Frame):
         der.pack_propagate(False)
 
         fila = tk.Frame(der, bg=FONDO)
-        fila.pack(fill="x", pady=(6, 0))
+        fila.pack(fill="x")
         self.var = tk.StringVar(value="0.00")
         self.casilla = tk.Entry(fila, textvariable=self.var, width=7,
                                 justify="right", bg=FONDO, fg=VERDE,
@@ -103,7 +103,7 @@ class PanelAngulo(tk.Frame):
         self.casilla.bind("<FocusOut>", self._desde_casilla)
 
         fila_r = tk.Frame(der, bg=FONDO)
-        fila_r.pack(fill="x", pady=(4, 0))
+        fila_r.pack(fill="x", pady=(2, 0))
         self.var_rumbo = tk.StringVar(value="0.00")
         self.casilla_rumbo = tk.Entry(fila_r, textvariable=self.var_rumbo,
                                       width=7, justify="right", bg=FONDO,
@@ -124,12 +124,12 @@ class PanelAngulo(tk.Frame):
             activebackground=CIAN, activeforeground=FONDO, relief="solid",
             bd=1, highlightthickness=0, font=fuente(10, True), cursor="hand2",
             command=self._pulsar_enviar)
-        self.btn_enviar.pack(fill="x", pady=(10, 6))
+        self.btn_enviar.pack(fill="x", pady=(4, 2))
 
         tk.Label(der, text="EN EL COHETE", bg=FONDO, fg=VERDE_OSC,
                  font=fuente(7), anchor="w").pack(fill="x")
         self.lbl_cohete = tk.Label(der, text="--", bg=FONDO, fg=CIAN,
-                                   font=fuente(13, True), anchor="w")
+                                   font=fuente(8, True), anchor="w")
         self.lbl_cohete.pack(fill="x")
         self.lbl_origen = tk.Label(der, text="", bg=FONDO, fg=VERDE_MED,
                                    font=fuente(7), anchor="w", justify="left",
@@ -138,7 +138,7 @@ class PanelAngulo(tk.Frame):
         self.lbl_estado = tk.Label(der, text="", bg=FONDO, fg=AMBAR,
                                    font=fuente(8, True), anchor="w",
                                    justify="left", wraplength=165)
-        self.lbl_estado.pack(fill="x", pady=(8, 0))
+        self.lbl_estado.pack(fill="x", pady=(2, 0))
 
     # --- Elección del valor ---
 
@@ -147,6 +147,11 @@ class PanelAngulo(tk.Frame):
         self.valor = round(grados, 2)
         self.var.set("%.2f" % self.valor)
         self._pintar_ruleta()
+
+    def poner_rumbo(self, grados):
+        r = float(grados) % 360.0
+        self.rumbo = round(min(r, pq.RUMBO_MAX_GRADOS), 2)
+        self.var_rumbo.set("%.2f" % self.rumbo)
 
     def _geometria(self):
         w = max(self.lienzo.winfo_width(), 40)

@@ -13,11 +13,14 @@ acaba duplicado en otro sitio y los dos se separan.
 """
 
 import math
+import os
+import struct
 import time
 
 from widgets import (AMBAR, APAGADO, AZUL, CIAN, FONDO, MAGENTA, REJILLA, ROJO,
                      VIOLETA,
-                     VERDE, VERDE_MED, VERDE_OSC, Panel, barra_con_centro,
+                     VERDE, VERDE_MED, VERDE_OSC, Panel, atenuar,
+                     barra_con_centro,
                      barra_segmentada, circulo_fase, fuente, lampara, rejilla,
                      traza)
 
@@ -431,10 +434,45 @@ class PanelFases(Panel):
 # --- Actitud ----------------------------------------------------------------
 
 
+# Modelo 3D del cohete para el panel de actitud: STL binario, eje Z del
+# modelo a lo largo del cohete (aletas en Z = 0, morro en Z máximo).
+MODELO_COHETE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "modelos", "ASPID_lowpoly.stl")
+
+
+def _cargar_stl(ruta):
+    """
+    Triángulos del STL en ejes de CUERPO (X morro, Y derecha, Z abajo),
+    centrados en la mitad del cohete y escalados a media longitud 1.
+    STL Z -> cuerpo X, STL X -> cuerpo Y, STL Y -> cuerpo Z (giro puro).
+    None si no se puede leer: el panel vuelve a la flecha.
+    """
+    try:
+        with open(ruta, "rb") as fh:
+            datos = fh.read()
+        n = struct.unpack_from("<I", datos, 80)[0]
+        if len(datos) < 84 + 50 * n or n == 0:
+            return None
+        tris = []
+        for i in range(n):
+            v = struct.unpack_from("<12f", datos, 84 + 50 * i)
+            tris.append((v[3:6], v[6:9], v[9:12]))
+    except (OSError, struct.error):
+        return None
+    zs = [p[2] for t in tris for p in t]
+    z_min, z_max = min(zs), max(zs)
+    medio = (z_min + z_max) / 2.0
+    escala = 2.0 / (z_max - z_min)
+    return [tuple(((p[2] - medio) * escala, p[0] * escala, p[1] * escala)
+                  for p in t) for t in tris]
+
+
 class PanelActitud(Panel):
     """
-    Esfera de actitud. El vector brillante es el morro; la retícula es el
-    marco NED, con el horizonte marcado.
+    Actitud: el modelo 3D del cohete (MODELO_COHETE) girado con el
+    cuaternión del paquete, visto desde una cámara fija (norte al fondo a la
+    derecha, algo por encima del horizonte). Gira entero, así que también se
+    ve el alabeo.
 
     Se enseña la ELEVACION del morro y no el cabeceo de Euler porque la
     elevación no tiene bloqueo de cardán, y el cohete se pasa toda la cuenta
@@ -443,6 +481,11 @@ class PanelActitud(Panel):
 
     AZIMUT_CAMARA = math.radians(32.0)
     ELEV_CAMARA = math.radians(20.0)
+    # Luz en ejes de cámara (x derecha, y abajo, prof < 0 hacia el observador)
+    LUZ = (-0.45, -0.55, -0.70)
+
+    _modelo = None
+    _modelo_leido = False
 
     def _proyectar(self, n, e, d):
         X, Y, Z = e, n, -d
@@ -455,24 +498,47 @@ class PanelActitud(Panel):
         prof = y2 * ce - Z * se  # < 0 = hacia el observador
         return sx, sy, prof
 
-    def _curva(self, puntos, cx, cy, r, color_frente, color_fondo, ancho=1):
-        tramo = []
-        delante_previo = None
-        for (n, e, d) in puntos:
-            sx, sy, prof = self._proyectar(n, e, d)
-            delante = prof < 0
-            px, py = cx + sx * r, cy + sy * r
-            if delante_previo is not None and delante != delante_previo:
-                if len(tramo) >= 4:
-                    self.create_line(
-                        tramo, fill=color_frente if delante_previo
-                        else color_fondo, width=ancho)
-                tramo = tramo[-2:] if len(tramo) >= 2 else []
-            tramo.extend((px, py))
-            delante_previo = delante
-        if len(tramo) >= 4:
-            self.create_line(tramo, fill=color_frente if delante_previo
-                             else color_fondo, width=ancho)
+    @classmethod
+    def _cargar_modelo(cls):
+        if not cls._modelo_leido:
+            cls._modelo_leido = True
+            cls._modelo = _cargar_stl(MODELO_COHETE)
+        return cls._modelo
+
+    def _pintar_modelo(self, modelo, quat, cx, cy, r, color):
+        w, x, y, z = quat
+        nq = math.sqrt(w * w + x * x + y * y + z * z) or 1.0
+        w, x, y, z = w / nq, x / nq, y / nq, z / nq
+        # Cuerpo -> NED (la primera columna es morro_ned de paquete.py)
+        m = ((1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)),
+             (2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)),
+             (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)))
+        lx, ly, lz = self.LUZ
+        nl = math.sqrt(lx * lx + ly * ly + lz * lz)
+        caras = []
+        for tri in modelo:
+            q = []
+            for (bx, by, bz) in tri:
+                q.append(self._proyectar(
+                    m[0][0] * bx + m[0][1] * by + m[0][2] * bz,
+                    m[1][0] * bx + m[1][1] * by + m[1][2] * bz,
+                    m[2][0] * bx + m[2][1] * by + m[2][2] * bz))
+            (ax, ay, az), (bx, by, bz), (qx, qy, qz) = q
+            ux, uy, uz = bx - ax, by - ay, bz - az
+            vx, vy, vz = qx - ax, qy - ay, qz - az
+            nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+            nn = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if nn == 0.0:
+                continue
+            luz = abs(nx * lx + ny * ly + nz * lz) / (nn * nl)
+            caras.append((az + bz + qz, luz, q))
+        # Pintor: lo más lejano primero
+        caras.sort(key=lambda c: -c[0])
+        for _, luz, q in caras:
+            col = atenuar(color, 0.25 + 0.75 * luz)
+            self.create_polygon([v for (sx, sy, _) in q
+                                 for v in (cx + sx * r, cy + sy * r)],
+                                fill=col, outline=col)
 
     def pintar(self):
         e = self.estado
@@ -482,59 +548,25 @@ class PanelActitud(Panel):
         if r < 10:
             return
 
-        self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=REJILLA)
-
-        paso = math.radians(6)
-        # Paralelos
-        for lat_g in (-60, -30, 0, 30, 60):
-            lat = math.radians(lat_g)
-            pts = []
-            t = 0.0
-            while t <= 2 * math.pi + paso:
-                pts.append((math.cos(lat) * math.cos(t),
-                            math.cos(lat) * math.sin(t),
-                            -math.sin(lat)))
-                t += paso
-            horizonte = (lat_g == 0)
-            self._curva(pts, cx, cy, r,
-                        VERDE_MED if horizonte else VERDE_OSC,
-                        VERDE_OSC if horizonte else REJILLA,
-                        2 if horizonte else 1)
-        # Meridianos
-        for lon_g in range(0, 180, 30):
-            lon = math.radians(lon_g)
-            pts = []
-            t = 0.0
-            while t <= 2 * math.pi + paso:
-                pts.append((math.cos(t) * math.cos(lon),
-                            math.cos(t) * math.sin(lon),
-                            -math.sin(t)))
-                t += paso
-            self._curva(pts, cx, cy, r, VERDE_OSC, REJILLA)
-
-        # Rosa de los vientos sobre el horizonte
-        for etq, (n, ee) in (("N", (1, 0)), ("E", (0, 1)),
-                             ("S", (-1, 0)), ("O", (0, -1))):
-            sx, sy, prof = self._proyectar(n, ee, 0)
-            self.create_text(cx + sx * (r + 9), cy + sy * (r + 9), text=etq,
-                             fill=VERDE_MED if prof < 0 else VERDE_OSC,
-                             font=fuente(8, True))
-
         p = e.paquete if e else None
         if p is None:
             self.create_text(cx, y1 - 6, text="SIN ACTITUD", fill=VERDE_OSC,
                              font=fuente(8))
             return
 
-        # Vector morro
-        n, ee, d = p.morro_ned
-        sx, sy, prof = self._proyectar(n, ee, d)
-        px, py = cx + sx * r, cy + sy * r
         col = VERDE if p.nav_valida else AMBAR
-        self.create_line(cx, cy, px, py, fill=col, width=2,
-                         arrow="last", arrowshape=(9, 11, 4))
-        self.create_oval(px - 3, py - 3, px + 3, py + 3, fill=col,
-                         outline=FONDO)
+        modelo = self._cargar_modelo()
+        if modelo is not None:
+            # Un poco menor que r: con el cohete vertical las aletas pisaban
+            # los textos de abajo
+            self._pintar_modelo(modelo, p.quat, cx, cy, r * 0.9, col)
+        else:
+            # Sin el STL, el vector morro como antes
+            n, ee, d = p.morro_ned
+            sx, sy, prof = self._proyectar(n, ee, d)
+            px, py = cx + sx * r, cy + sy * r
+            self.create_line(cx, cy, px, py, fill=col, width=2,
+                             arrow="last", arrowshape=(9, 11, 4))
 
         self.create_text(x0, y1 - 14, anchor="w",
                          text="ELEVACION %+6.1f" % p.elevacion_deg,

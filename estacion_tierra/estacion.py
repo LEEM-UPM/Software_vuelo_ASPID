@@ -237,6 +237,7 @@ class Estado(object):
         self.rumbo_definido_cohete = False
         self.intentos_rumbo = 0
         self.t_rumbo = 0.0
+        self.rumbo_recien_leido = False
 
         # Pruebas de aerofreno. Lo del cohete sale SOLO de sus acuses.
         self.aero_prueba_num = 0       # numero de la ultima prueba pedida
@@ -678,6 +679,7 @@ class Estado(object):
         self.rumbo_definido_cohete = a.definido
         if self.rumbo_estado == "consultando" and a.aceptado:
             self.rumbo_estado = ""
+            self.rumbo_recien_leido = True
             self.anotar("el cohete tiene el rumbo de la rampa en %.2f grados%s"
                         % (self.rumbo_cohete, "" if a.definido
                            else " (sin definir)"), CIAN)
@@ -2282,6 +2284,10 @@ class Estacion(object):
                 # La ruleta arranca en lo que tiene el cohete
                 self.panel_angulo.poner(e.angulo_cohete)
                 e.angulo_recien_leido = False
+            if e.rumbo_recien_leido:
+                # Y la casilla del rumbo, igual
+                self.panel_angulo.poner_rumbo(e.rumbo_cohete)
+                e.rumbo_recien_leido = False
             self.panel_angulo.actualizar(e)
         self.btn_angulo.configure(text="CERRAR ANGULO" if self.angulo_abierto
                                   else "ANGULO LANZ.")
