@@ -24,6 +24,7 @@
 #include "storage.h"
 #include "despliegue.h"
 #include "emergencia.h"
+#include "freno_altura.h"
 #include "lanzamiento.h"
 #include "memoria_vuelo.h"
 #include "watchdog.h"
@@ -169,6 +170,7 @@ int main(void) {
      * consola, sección TARJETAS SD). Bloquea mientras dura (~1 s por tarjeta). */
     storage_init();
     lanzamiento_init(); /* el angulo de la rampa guardado, si lo hay */
+    freno_altura_init(); /* y la altura del aerofreno */
 
     /* La calibración de la aviónica (CMD_AVIONICS_CALIBRATE) ya NO se pide
      * (2026-10-04): los sesgos de las IMU los estima el EKF del GNC al
@@ -182,6 +184,9 @@ int main(void) {
      * gnc_set_rampa(). Antes de gnc_init(), que es quien la aplica. */
     gnc_set_rampa(lanzamiento_grados(), lanzamiento_rumbo_grados(),
                   GNC_ALABEO_MEDIR);
+    /* La altura del aerofreno es un ajustable del GNC (gc_tun): gnc_init()
+     * no la toca, así que da igual antes o después */
+    (void)gnc_set_altura_freno((float)freno_altura_m());
     gnc_init();
   }
 

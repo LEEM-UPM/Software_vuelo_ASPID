@@ -23,13 +23,14 @@
  * uno de cada 8 de nav y máquina de estados) */
 #define PIL_GC_CADA GNC_GC_DECIMATION
 
-/* PILNAVO.CSV: una fila de cada esto. Las 76487 enteras son ~42 MB de SD. */
+/* PILNAVO.CSV: una fila de cada esto. Las 75805 enteras son ~42 MB de SD. */
 #define PIL_NAV_CSV_CADA 4U
 
-/* Valores de fábrica de nav_tun (nav.c de la v1.6, iguales que en la v1.5). El dataset se
- * generó con los ajustables de fábrica, y gnc_init() pone los de la rampa. */
+/* Valores de fábrica de nav_tun (nav.c de la v1.7: rampa de EuRoC, azimut
+ * 144; en la v1.6 era 0). El dataset se generó con los ajustables de
+ * fábrica, y gnc_init() pone los de la rampa. */
 #define PIL_RAIL_ELEV_FABRICA 84.5f
-#define PIL_RAIL_AZIM_FABRICA 0.0f
+#define PIL_RAIL_AZIM_FABRICA 144.0f
 
 /* Los registros van empaquetados sin relleno, en el orden de
  * PIL_manifest.txt (el conversor tools/pil_csv_to_bin.py saca los tipos del
@@ -152,7 +153,7 @@ typedef struct __attribute__((packed)) {
   uint32_t status_word; /* v1.6 */
 } pil_gc_exp_t;
 
-/* Lo que da tools/pil_csv_to_bin.py con el manifiesto de la v1.6 */
+/* Lo que da tools/pil_csv_to_bin.py con el manifiesto de la v1.7 (igual que la v1.6) */
 _Static_assert(sizeof(pil_nav_in_t) == 123U, "PILNAVI: no cuadra con el manifiesto");
 _Static_assert(sizeof(pil_nav_exp_t) == 160U, "PILNAVE: no cuadra con el manifiesto");
 _Static_assert(sizeof(pil_sm_in_t) == 80U, "PILSMI: no cuadra con el manifiesto");
@@ -308,7 +309,7 @@ static bool _open_vectors(storage_stream_t *st, const char *path,
   pil_header_t h;
   if (!storage_stream_read(st, &h, sizeof(h)) ||
       (memcmp(h.magic, PIL_MAGIC, sizeof(h.magic)) != 0)) {
-    _report("   %s: no es un archivo PIL de la v1.6 (regenerar con"
+    _report("   %s: no es un archivo PIL de la v1.7 (regenerar con"
             " pil_csv_to_bin.py)\r\n", path);
     (void)storage_stream_close(st);
     return false;
@@ -493,6 +494,9 @@ static void _gc_paso(const pil_gc_in_t *r, const pil_gc_exp_t *w,
 
 void pil_test_run(void) {
   memset(&s_result, 0, sizeof(s_result));
+  /* La altura del aerofreno de vuelo: la prueba pone la de fabrica y
+   * gnc_init() no toca gc_tun, asi que se devuelve a mano al terminar */
+  const float freno_vuelo_m = gnc_altura_freno_m();
   _cycle_counter_init();
 
   s_summary_open = storage_stream_open_write(&s_summary, PIL_SD, "PILRES.TXT",
@@ -500,8 +504,8 @@ void pil_test_run(void) {
                                              sizeof(s_summary_buf));
 
   _report("\r\n=================================================\r\n");
-  _report(" BANCO PIL DEL GNC v1.6  (nav y maquina de estados a\r\n");
-  _report(" 416 Hz, guiado a 52 Hz; 183,9 s, vuelo entero)\r\n");
+  _report(" BANCO PIL DEL GNC v1.7  (nav y maquina de estados a\r\n");
+  _report(" 416 Hz, guiado a 52 Hz; 182,2 s, vuelo entero)\r\n");
   _report("=================================================\r\n");
   if (!s_summary_open) {
     DebugOut_Printf("   (sin PILRES.TXT: la SD1 no esta montada)\r\n");
@@ -571,6 +575,9 @@ void pil_test_run(void) {
     memset(&gc_Y, 0, sizeof(gc_Y));
     nav_tun.rail_elev_deg = PIL_RAIL_ELEV_FABRICA;
     nav_tun.rail_azim_deg = PIL_RAIL_AZIM_FABRICA;
+    /* Y la altura del aerofreno de fabrica: con otra guardada en la SD el
+     * guiado entraria en control a otra altura que el dataset */
+    gc_tun.min_ctrl_alt_agl_m = gnc_altura_freno_fabrica_m();
     nav_initialize();
     state_machine_initialize();
     gc_initialize();
@@ -707,7 +714,9 @@ void pil_test_run(void) {
   }
 
   /* La prueba deja los modelos al final del vuelo simulado y con los
-   * ajustables de fábrica: gnc_init() los deja otra vez como para volar */
+   * ajustables de fábrica: gnc_init() los deja otra vez como para volar
+   * (la rampa); la altura del aerofreno, a mano */
+  (void)gnc_set_altura_freno(freno_vuelo_m);
   gnc_init();
 }
 

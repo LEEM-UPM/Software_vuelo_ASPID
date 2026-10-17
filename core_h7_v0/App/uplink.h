@@ -166,6 +166,22 @@
  * Idempotente. */
 #define UPLINK_CMD_CAMARAS 0x17U
 
+/* 16 bits: altura del aerofreno en metros AGL (por debajo no se abre, ver
+ * freno_altura.h). Vale si 0 < altura < apogeo objetivo del GNC. 0xFFFF
+ * consulta. Mismas reglas y mismo acuse que el ángulo: solo en tierra y sin
+ * simular; el acuse lleva SIEMPRE la altura que usa el cohete, y en el byte
+ * 6 si está definida y guardada en la SD. */
+#define UPLINK_CMD_ALTURA_FRENO 0x18U
+
+/* Reintentar el alineado del GNC (gnc_realinear: los tres modelos de cero y
+ * a alinearse otra vez con la rampa de vuelo). Para cuando el alineado ha
+ * fallado y el GNC se ha quedado en ERROR. Solo en tierra, fuera del modo de
+ * emergencia y sin simular. Parámetro = número de petición 1..255, que elige
+ * tierra: el cohete recuerda el último que ejecutó y, si le llega otra vez
+ * el mismo (un reintento), solo contesta, no vuelve a empezar el alineado.
+ * Acuse SIEMPRE, valor = el número. */
+#define UPLINK_CMD_REALINEAR 0x19U
+
 /* Valor especial del ángulo: no cambia nada, sólo pide el acuse con el valor
  * que tiene el cohete. Así tierra puede saberlo sin tener que mandar uno. */
 #define UPLINK_ANGULO_CONSULTA 0xFFFFU
@@ -199,8 +215,9 @@ typedef enum {
   UPLINK_DENEGADO_POWER,           /* power no respondió o CAN lleno */
   UPLINK_DENEGADO_SIMULANDO,       /* pirotécnico o modo test en simulación */
   UPLINK_DENEGADO_SIN_ARCHIVO,     /* no hay VUELO.BIN válido en la SD1 */
-  UPLINK_DENEGADO_FUERA_DE_RANGO,  /* ángulo fuera de 0..90 grados o
-                                      extensión fuera de 0..100 % */
+  UPLINK_DENEGADO_FUERA_DE_RANGO,  /* ángulo fuera de 0..90 grados,
+                                      extensión fuera de 0..100 % o altura
+                                      del aerofreno fuera de 0..apogeo */
 } uplink_denegado_t;
 
 /* Llamar en cada vuelta del bucle principal: mira si la RF ha pasado algo,

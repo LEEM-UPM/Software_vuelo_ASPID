@@ -35,6 +35,7 @@ from tkinter import simpledialog
 
 import angulo
 import cats as ct
+import freno
 import grabador as grab
 import paneles
 import paquete as pq
@@ -121,6 +122,8 @@ def _con_jitter(periodo):
 # plazo tras el que se da por perdido. Con jitter, como todos (_con_jitter).
 REINTENTO_ANGULO_S = 0.5
 PLAZO_ANGULO_S = 60.0
+# Realinear: si en este tiempo no llega el acuse, se deja de insistir
+PLAZO_REALINEAR_S = 20.0
 
 # Pruebas de aerofreno: igual que el angulo, hasta ver el acuse
 REINTENTO_AEROFRENO_S = 0.5
@@ -238,6 +241,25 @@ class Estado(object):
         self.intentos_rumbo = 0
         self.t_rumbo = 0.0
         self.rumbo_recien_leido = False
+
+        # Altura del aerofreno (App/freno_altura.h): como el angulo. Lo del
+        # cohete sale SOLO de sus acuses.
+        self.freno_pedido = None       # metros, lo ultimo mandado
+        self.freno_estado = ""         # consultando/enviando/confirmado/...
+        self.freno_motivo = ""
+        self.freno_cohete = None       # metros que usa el cohete
+        self.freno_definido_cohete = False
+        self.freno_guardado_sd = False
+        self.intentos_freno = 0
+        self.t_freno = 0.0
+        self.freno_recien_leido = False
+
+        # Reintentar el alineado del GNC (UPLINK_CMD_REALINEAR): se reenvia
+        # la MISMA peticion hasta ver su acuse
+        self.realinear_num = 0
+        self.realinear_estado = ""     # enviando/aceptado/denegado/...
+        self.intentos_realinear = 0
+        self.t_realinear = 0.0
 
         # Pruebas de aerofreno. Lo del cohete sale SOLO de sus acuses.
         self.aero_prueba_num = 0       # numero de la ultima prueba pedida
@@ -556,6 +578,12 @@ class Estado(object):
         if a.cmd == pq.UPLINK_CMD_RUMBO:
             self._encajar_acuse_rumbo(a)
             return
+        if a.cmd == pq.UPLINK_CMD_ALTURA_FRENO:
+            self._encajar_acuse_freno(a)
+            return
+        if a.cmd == pq.UPLINK_CMD_REALINEAR:
+            self._encajar_acuse_realinear(a)
+            return
         if a.cmd == pq.UPLINK_CMD_CAMARAS:
             if not a.aceptado and self.camaras_pedidas is not None:
                 self.camaras_motivo = a.motivo_texto
@@ -695,6 +723,45 @@ class Estado(object):
                             % (self.rumbo_cohete, "" if a.guardado else
                                " (pero NO se pudo guardar en la SD)"),
                             VERDE if a.guardado else AMBAR)
+
+    def _encajar_acuse_freno(self, a):
+        """Como el del angulo: confirmada solo si trae ESTA altura."""
+        self.freno_cohete = a.valor
+        self.freno_definido_cohete = a.definido
+        self.freno_guardado_sd = a.guardado
+        if self.freno_estado == "consultando" and a.aceptado:
+            self.freno_estado = ""
+            self.freno_recien_leido = True
+            self.anotar("el cohete tiene la altura del aerofreno en %d m%s"
+                        % (self.freno_cohete, "" if a.definido
+                           else " (sin definir, la de fabrica)"), CIAN)
+        elif self.freno_estado == "enviando":
+            if not a.aceptado:
+                self.freno_estado = "denegado"
+                self.freno_motivo = a.motivo_texto
+                self.anotar("el cohete DENIEGA la altura del aerofreno: %s"
+                            % a.motivo_texto, ROJO)
+            elif self.freno_cohete == self.freno_pedido:
+                self.freno_estado = "confirmado"
+                self.anotar("altura del aerofreno %d m CONFIRMADA%s"
+                            % (self.freno_cohete, "" if a.guardado else
+                               " (pero NO se pudo guardar en la SD)"),
+                            VERDE if a.guardado else AMBAR)
+
+    def _encajar_acuse_realinear(self, a):
+        # Solo vale el acuse de ESTA peticion
+        if self.realinear_estado != "enviando" or \
+                a.valor != self.realinear_num:
+            return
+        if a.aceptado:
+            self.realinear_estado = "aceptado"
+            self.anotar("GNC REINICIADO: se vuelve a alinear (2 s con el "
+                        "cohete QUIETO; si no, ERROR otra vez a los 60 s)",
+                        VERDE)
+        else:
+            self.realinear_estado = "denegado"
+            self.anotar("el cohete DENIEGA realinear: %s" % a.motivo_texto,
+                        ROJO)
 
     def _encajar_acuse_prueba_aero(self, a):
         # Solo vale el acuse de ESTA prueba: uno de una anterior que llegue
@@ -875,6 +942,9 @@ class Simulador(object):
         self.angulo_definido = False
         self.rumbo = 0
         self.rumbo_definido = False
+        self.freno = pq.FRENO_FABRICA_M   # metros, como freno_altura.c
+        self.freno_definido = False
+        self.realinear_num = 0        # como uplink.c: el ultimo ejecutado
         self.aero_prueba_num = 0      # como uplink.c: el ultimo ejecutado
         self.aero_prueba_t0 = None    # monotonic del arranque de la prueba
         self.aero_fija = None         # 0..1, extension fijada desde tierra
@@ -995,6 +1065,47 @@ class Simulador(object):
             bits = (0x03 if self.rumbo_definido else 0)
             self.acuse = bytes([pq.ACUSE_MARCA, cmd, res, self.rumbo & 0xFF,
                                 (self.rumbo >> 8) & 0xFF,
+                                self.n_acuses & 0xFF, bits, 0])
+            self.n_acuses += 1
+        elif cmd == pq.UPLINK_CMD_REALINEAR:
+            if param == 0:
+                res = 7
+            elif param == self.realinear_num:
+                res = 0                    # reintento: solo se contesta
+            elif self.simulando:
+                res = 5
+            elif not self._en_tierra():
+                res = 1
+            else:
+                res = 0
+                self.realinear_num = param
+            if res:
+                self.denegados += 1
+                self.motivo = res
+            self.acuse = bytes([pq.ACUSE_MARCA, cmd, res, param & 0xFF, 0,
+                                self.n_acuses & 0xFF, 0, 0])
+            self.n_acuses += 1
+        elif cmd == pq.UPLINK_CMD_ALTURA_FRENO:
+            fase = self._perfil(time.monotonic() - self.t0)[0]
+            if param == pq.ANGULO_CONSULTA:
+                res = 0
+            elif self.simulando:
+                res = 5
+            elif self._estado_cohete(fase) == pq.ESTADO_EN_VUELO or \
+                    fase not in (0, 7):
+                res = 1
+            elif not pq.FRENO_MIN_M <= param <= pq.FRENO_MAX_M:
+                res = 7
+            else:
+                res = 0
+                self.freno = param
+                self.freno_definido = True
+            if res:
+                self.denegados += 1
+                self.motivo = res
+            bits = (0x03 if self.freno_definido else 0)
+            self.acuse = bytes([pq.ACUSE_MARCA, cmd, res, self.freno & 0xFF,
+                                (self.freno >> 8) & 0xFF,
                                 self.n_acuses & 0xFF, bits, 0])
             self.n_acuses += 1
         elif cmd in (pq.UPLINK_CMD_PRUEBA_AEROFRENO,
@@ -1497,7 +1608,12 @@ class Estacion(object):
         self._proximo_sim = 0.0
         self._proximo_angulo = 0.0
         self._proximo_rumbo = 0.0
+        self._proximo_freno = 0.0
         self._proximo_camaras = 0.0
+        self._proximo_realinear = 0.0
+        # Numero de peticion de realinear: al azar, como el de la prueba de
+        # aerofreno, para no repetir el ultimo si se reinicia la estacion
+        self._num_realinear = random.randint(1, 255)
         self._proximo_aero_prueba = 0.0
         self._proximo_aero_ext = 0.0
         # Numero de prueba de aerofreno: empieza al azar para que, si se
@@ -1508,7 +1624,9 @@ class Estacion(object):
         self._proximo_pedir = 0.0
         self._numero_ping = 0
         self.angulo_abierto = False
+        self.freno_abierto = False
         self._panel_visible = "mapa"
+        self._freno_visible = False
         self._test_visible = False
 
         raiz.title("LEEM - Estacion de tierra")
@@ -1610,7 +1728,14 @@ class Estacion(object):
 
         registrar(paneles.PanelCrudo(r, titulo="PAQUETE CRUDO"), 5, 0)
         registrar(paneles.PanelAceleracion(r, titulo="ACELERACION"), 5, 1)
-        registrar(paneles.PanelSalud(r, titulo="SALUD"), 5, 2)
+        self.panel_salud = registrar(paneles.PanelSalud(r, titulo="SALUD"),
+                                     5, 2)
+        # La altura del aerofreno va en la casilla de SALUD y se alterna con
+        # ella (boton a la derecha del de camaras)
+        self.panel_freno = freno.PanelFreno(r, self.enviar_freno,
+                                            self.alternar_freno)
+        poner(self.panel_freno, 5, 2)
+        self.panel_freno.grid_remove()
 
         self._construir_registro(poner)
         registrar(paneles.PanelRanuras(r, titulo="RANURAS RESERVADAS"),
@@ -1666,6 +1791,12 @@ class Estacion(object):
         self.btn_camaras = boton(marco, "CAMARAS ?", self.alternar_camaras,
                                  CIAN, 17)
         self.btn_camaras.pack(side="left", padx=3)
+        self.btn_freno = boton(marco, "ALT. AEROFRENO", self.alternar_freno,
+                               CIAN, 16)
+        self.btn_freno.pack(side="left", padx=3)
+        self.btn_realinear = boton(marco, "REALINEAR GNC", self.realinear,
+                                   CIAN, 15)
+        self.btn_realinear.pack(side="left", padx=3)
         for etq in ("ARMAR", "DESARMAR", "ABORTAR"):
             col = ROJO if etq == "ABORTAR" else VERDE
             boton(marco, etq, None, col, 11, activo=False).pack(side="left",
@@ -2026,6 +2157,121 @@ class Estacion(object):
         e.t_rumbo = time.monotonic()
         self._proximo_rumbo = 0.0
         e.anotar("-> rumbo de la rampa %.2f grados" % e.rumbo_pedido, CIAN)
+
+    # --- Altura del aerofreno ---
+
+    def alternar_freno(self):
+        self.freno_abierto = not self.freno_abierto
+        e = self.estado
+        # Al abrir, si no se sabe que tiene el cohete, se le pregunta
+        if self.freno_abierto and e.freno_cohete is None and \
+                e.freno_estado not in ("enviando", "consultando"):
+            self.consultar_freno()
+
+    def consultar_freno(self):
+        e = self.estado
+        e.freno_estado = "consultando"
+        e.intentos_freno = 0
+        e.t_freno = time.monotonic()
+        self._proximo_freno = 0.0
+
+    def enviar_freno(self, metros):
+        """
+        Lo llama el panel. Se reintenta cada ~REINTENTO_ANGULO_S hasta que el
+        cohete conteste con ESTA altura, la deniegue, o pase PLAZO_ANGULO_S.
+        """
+        e = self.estado
+        e.freno_pedido = int(metros)
+        e.freno_estado = "enviando"
+        e.freno_motivo = ""
+        e.intentos_freno = 0
+        e.t_freno = time.monotonic()
+        self._proximo_freno = 0.0
+        e.anotar("-> altura del aerofreno %d m" % e.freno_pedido, CIAN)
+
+    def _mantener_freno(self):
+        e = self.estado
+        if e.freno_estado not in ("enviando", "consultando"):
+            return
+        ahora = time.monotonic()
+        if ahora - e.t_freno > PLAZO_ANGULO_S:
+            e.freno_estado = "sin respuesta"
+            e.anotar("el cohete no ha contestado a la altura del aerofreno "
+                     "en %.0f s" % PLAZO_ANGULO_S, ROJO)
+            return
+        if ahora < self._proximo_freno:
+            return
+        if e.freno_estado == "consultando":
+            valor = pq.ANGULO_CONSULTA
+        else:
+            valor = e.freno_pedido
+        self._enviar_comando(pq.UPLINK_CMD_ALTURA_FRENO, valor,
+                             silencioso=True)
+        e.intentos_freno += 1
+        self._proximo_freno = ahora + _con_jitter(REINTENTO_ANGULO_S)
+
+    def _pintar_freno(self):
+        """La casilla de SALUD: la salud, o la altura del aerofreno."""
+        e = self.estado
+        if self.freno_abierto != self._freno_visible:
+            if self.freno_abierto:
+                self.panel_salud.grid_remove()
+                self.panel_freno.grid()
+            else:
+                self.panel_freno.grid_remove()
+                self.panel_salud.grid()
+            self._freno_visible = self.freno_abierto
+        if self.freno_abierto:
+            if e.freno_recien_leido:
+                # La casilla arranca en lo que tiene el cohete
+                self.panel_freno.poner(e.freno_cohete)
+                e.freno_recien_leido = False
+            self.panel_freno.actualizar(e)
+        self.btn_freno.configure(text="CERRAR AEROFRENO" if self.freno_abierto
+                                 else "ALT. AEROFRENO")
+
+    # --- Reintentar el alineado ---
+
+    def realinear(self):
+        """
+        Pide al cohete que reinicie el GNC y se vuelva a alinear. La misma
+        peticion (mismo numero) se reenvia cada ~REINTENTO_ANGULO_S hasta su
+        acuse o PLAZO_REALINEAR_S: el cohete solo la ejecuta una vez. Pulsar
+        otra vez es una peticion NUEVA (otro numero).
+        """
+        e = self.estado
+        self._num_realinear = self._num_realinear % 255 + 1
+        e.realinear_num = self._num_realinear
+        e.realinear_estado = "enviando"
+        e.intentos_realinear = 0
+        e.t_realinear = time.monotonic()
+        self._proximo_realinear = 0.0
+        e.anotar("-> realinear el GNC (#%d)" % e.realinear_num, CIAN)
+
+    def _mantener_realinear(self):
+        e = self.estado
+        if e.realinear_estado != "enviando":
+            return
+        ahora = time.monotonic()
+        if ahora - e.t_realinear > PLAZO_REALINEAR_S:
+            e.realinear_estado = "sin respuesta"
+            e.anotar("el cohete no ha contestado a realinear en %.0f s"
+                     % PLAZO_REALINEAR_S, ROJO)
+            return
+        if ahora < self._proximo_realinear:
+            return
+        self._enviar_comando(pq.UPLINK_CMD_REALINEAR, e.realinear_num,
+                             silencioso=True)
+        e.intentos_realinear += 1
+        self._proximo_realinear = ahora + _con_jitter(REINTENTO_ANGULO_S)
+
+    def _pintar_realinear(self):
+        e = self.estado
+        if e.realinear_estado == "enviando":
+            self.btn_realinear.configure(
+                text="REALINEANDO %d" % e.intentos_realinear, fg=AMBAR)
+        else:
+            self.btn_realinear.configure(text="REALINEAR GNC", fg=CIAN)
 
     # --- Camaras ---
 
@@ -2409,6 +2655,8 @@ class Estacion(object):
             self._mantener_simulacion()
             self._mantener_angulo()
             self._mantener_rumbo()
+            self._mantener_freno()
+            self._mantener_realinear()
             self._mantener_camaras()
             self._mantener_aerofreno()
             self._mantener_peticiones()
@@ -2466,6 +2714,8 @@ class Estacion(object):
         for p in self.paneles:
             p.refrescar(self.estado)
         self._pintar_modo_test()
+        self._pintar_freno()
+        self._pintar_realinear()
 
         nuevos = min(self.estado.n_eventos - self._eventos_pintados,
                      len(self.estado.eventos))

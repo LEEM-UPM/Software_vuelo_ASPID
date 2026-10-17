@@ -14,6 +14,7 @@
 #include "fx_api.h"
 #include "gnc.h"
 #include "gnc_playback.h"
+#include "freno_altura.h"
 #include "lanzamiento.h"
 #include "main.h"
 #include "rf_telemetry.h"
@@ -381,6 +382,7 @@ static struct {
   uint32_t piros;
   uint16_t rampa;
   uint16_t rumbo;
+  uint16_t freno_m;
   bool power;
   bool avionica;
   bool rf;
@@ -1862,6 +1864,7 @@ static void _vigilar_eventos(const sys_state *st, uint32_t ahora) {
     s_prev.piros = uplink_piros_aceptados();
     s_prev.rampa = lanzamiento_centesimas();
     s_prev.rumbo = lanzamiento_rumbo_centesimas();
+    s_prev.freno_m = freno_altura_m();
     s_prev.power = st->power;
     s_prev.avionica = st->avionics;
     s_prev.rf = st->rf;
@@ -2032,6 +2035,12 @@ static void _vigilar_eventos(const sys_state *st, uint32_t ahora) {
         (double)rampa * 0.01, (double)rumbo * 0.01);
     s_prev.rampa = rampa;
     s_prev.rumbo = rumbo;
+  }
+  const uint16_t freno_m = freno_altura_m();
+  if (freno_m != s_prev.freno_m) {
+    _ev("altura_freno", freno_m, "altura del aerofreno %u m AGL",
+        (unsigned)freno_m);
+    s_prev.freno_m = freno_m;
   }
   if (st->power != s_prev.power) {
     _ev("placa", st->power ? 1 : 0, "power %s",
@@ -2505,7 +2514,8 @@ void aspid_data_init(const sys_state *state) {
 
   n = snprintf(
       s_fila, FILA_MAX,
-      "rampa: %.2f grados desde la vertical, rumbo %.2f (origen: %s)\r\n\r\n"
+      "rampa: %.2f grados desde la vertical, rumbo %.2f (origen: %s)\r\n"
+      "altura del aerofreno: %u m AGL (origen: %s)\r\n\r\n"
       "== QUE HAY EN ESTA CARPETA ==\r\n"
       "eventos/eventos.csv   todo lo que pasa, una linea por evento\r\n"
       "salud/salud.csv       1 Hz desde el arranque: bucle, GNC, sensores, "
@@ -2522,7 +2532,8 @@ void aspid_data_init(const sys_state *state) {
       "\r\n== EVENTOS IMPORTANTES (todos en eventos/eventos.csv) ==\r\n"
       "t_ms      hora UTC                 evento\r\n",
       (double)lanzamiento_grados(), (double)lanzamiento_rumbo_grados(),
-      lanzamiento_origen(), (unsigned)ASPID_DATA_HZ,
+      lanzamiento_origen(), (unsigned)freno_altura_m(),
+      freno_altura_origen(), (unsigned)ASPID_DATA_HZ,
       (unsigned)ASPID_DATA_ANTES_MS, (double)ASPID_DATA_FIN_ALTURA_M,
       (unsigned)GNC_RATE_HZ, (unsigned)ASPID_DATA_EMPUJE_ANTES_MS,
       (unsigned)(ASPID_DATA_EMPUJE_DESPUES_MS / 1000U),
@@ -2686,6 +2697,12 @@ static const char *_tipo_rx(const uint8_t *d, uint8_t len) {
     return "extension_aerofreno";
   case 0x16U:
     return "rumbo";
+  case 0x17U:
+    return "camaras";
+  case 0x18U:
+    return "altura_freno";
+  case 0x19U:
+    return "realinear";
   default:
     return "desconocido";
   }

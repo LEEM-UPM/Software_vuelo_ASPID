@@ -410,6 +410,8 @@ salieron, no que lo que salió fuera un comando nuestro.
 | `0x15` | extensión de aerofreno | 4 B | 0..100 % de la carrera | acuse con el % que tiene ahora |
 | `0x16` | rumbo de la rampa | 5 B | centésimas de grado desde el **norte geográfico**, sentido horario, 0..35999 · `0xFFFF` = sólo consultar | acuse con el valor guardado |
 | `0x17` | cámaras | 4 B | 1 encender · 0 apagar (primero paran de grabar, luego se corta la corriente) | acuse con el estado de verdad: b0 alimentación, b1 apagando (aún con corriente); un paquete de estado y uno de cámaras |
+| `0x19` | realinear el GNC | 4 B | número de petición 1..255 (el mismo número otra vez = reintento: solo contesta) · solo en tierra, fuera del modo de emergencia y sin simular · reinicia los tres modelos y se vuelve a alinear (2 s quieto) | acuse con el número |
+| `0x18` | altura del aerofreno | 5 B | metros AGL por debajo de los que no se abre el aerofreno, 1..2999 (menor que el apogeo objetivo del GNC) · `0xFFFF` = sólo consultar · solo en tierra y sin simular | acuse con la altura que usa el GNC; byte 6: b0 definida, b1 guardada en la SD (`FRENO.TXT`) |
 
 Un id que el cohete no conoce se cuenta y no tiene respuesta. Cuando un
 comando se deniega, el cohete manda un paquete de estado con el motivo en el

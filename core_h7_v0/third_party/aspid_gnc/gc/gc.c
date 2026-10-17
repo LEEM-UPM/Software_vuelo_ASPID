@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'gc'.
  *
- * Model version                  : 3.46
+ * Model version                  : 3.48
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Sat Oct 10 21:00:39 2026
+ * C/C++ source code generated on : Sat Oct 17 22:55:20 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -477,8 +477,8 @@ void gc_step(void)
   real_T apogee_err;
   real_T apogee_pred;
   real_T cmd_param;
-  real_T err_eff;
   real_T mach;
+  real_T min_ctrl_alt;
   real_T proj;
   real_T rtb_gc_state_out_t_airborne_s;
   real_T rtb_gc_state_out_t_apogee_s;
@@ -501,6 +501,7 @@ void gc_step(void)
   real32_T rtb_gc_ctrl_u_fallback;
   real32_T rtb_gc_ctrl_u_manual;
   real32_T rtb_gc_state_out_max_alt_m;
+  real32_T rtb_gc_state_out_min_ctrl_alt_m;
   real32_T rtb_gc_state_out_u_manual;
   real32_T rtb_normalizarporautoridad;
   uint16_T rtb_gc_state_out_apogee_cnt;
@@ -553,6 +554,8 @@ void gc_step(void)
   rtb_gc_state_out_t_airborne_s =
     gc_DW.GCState_Memory_PreviousInput.t_airborne_s;
   rtb_gc_state_out_t_barrido_s = gc_DW.GCState_Memory_PreviousInput.t_barrido_s;
+  rtb_gc_state_out_min_ctrl_alt_m =
+    gc_DW.GCState_Memory_PreviousInput.min_ctrl_alt_m;
   if (gc_DW.GCState_Memory_PreviousInput.init_done == 0) {
     rtb_gc_state_out_phase = 0;
     rtb_gc_state_out_t_phase_s = gc_U.gc_in.timestamp_s;
@@ -597,7 +600,7 @@ void gc_step(void)
   vel[1] = gc_U.gc_in.vel_ned[1];
   vel[2] = gc_U.gc_in.vel_ned[2];
   speed = gc_norm(vel);
-  gc_isa_atmos((real_T)gc_U.gc_in.alt_agl_m, 288.15, 101325.0, -0.0065, 287.05,
+  gc_isa_atmos(gc_U.gc_in.alt_agl_m + 160.0, 288.15, 101325.0, -0.0065, 287.05,
                1.4, 9.80665, &a_along, &apogee_pred, &apogee_err);
   mach = speed / apogee_err;
   if (gc_U.gc_in.alt_agl_m > rtb_gc_state_out_max_alt_m) {
@@ -615,6 +618,16 @@ void gc_step(void)
   if (gc_U.gc_in.telemetry_cmd.cmd_valid == 1) {
     cmd = gc_U.gc_in.telemetry_cmd.cmd_id;
     cmd_param = gc_U.gc_in.telemetry_cmd.cmd_param;
+  }
+
+  if ((cmd == 7) && ((gc_U.gc_in.rocket_state == 0) || (gc_U.gc_in.rocket_state ==
+        1)) && (cmd_param > 0.0) && (cmd_param < gc_tun.apogee_target_agl_m)) {
+    rtb_gc_state_out_min_ctrl_alt_m = (real32_T)cmd_param;
+  }
+
+  min_ctrl_alt = gc_tun.min_ctrl_alt_agl_m;
+  if (rtb_gc_state_out_min_ctrl_alt_m > 0.0F) {
+    min_ctrl_alt = rtb_gc_state_out_min_ctrl_alt_m;
   }
 
   apogee_pred = gc_DW.GCState_Memory_PreviousInput.apogee_pred_m;
@@ -753,8 +766,8 @@ void gc_step(void)
       if ((-(real_T)gc_U.gc_in.vel_ned[2] <= 0.0) && apogeo_evaluable) {
         new_phase = 4;
       } else if ((gc_U.gc_in.timestamp_s - rtb_gc_state_out_t_phase_s >= 1.0) &&
-                 (gc_U.gc_in.alt_agl_m >= gc_tun.min_ctrl_alt_agl_m) && (mach <=
-                  1.05) && (-(real_T)gc_U.gc_in.vel_ned[2] >= 30.0) &&
+                 (gc_U.gc_in.alt_agl_m >= min_ctrl_alt) && (mach <= 1.05) &&
+                 (-(real_T)gc_U.gc_in.vel_ned[2] >= 30.0) &&
                  rtb_controldeshabilitado) {
         new_phase = 3;
       }
@@ -766,15 +779,15 @@ void gc_step(void)
                           &gc_ConstP.GC_Logic_ctrl, &apogee_pred, &t_to_apogee,
                           &pred_ok);
       apogee_err = apogee_pred - gc_tun.apogee_target_agl_m;
-      err_eff = 0.0;
+      min_ctrl_alt = 0.0;
       if (apogee_err > gc_tun.deadband_m) {
-        err_eff = apogee_err - gc_tun.deadband_m;
+        min_ctrl_alt = apogee_err - gc_tun.deadband_m;
       } else if (apogee_err < -(real_T)gc_tun.deadband_m) {
-        err_eff = apogee_err + gc_tun.deadband_m;
+        min_ctrl_alt = apogee_err + gc_tun.deadband_m;
       }
 
       if ((pred_ok == 0) || (!rtb_controldeshabilitado)) {
-        err_eff = 0.0;
+        min_ctrl_alt = 0.0;
       }
 
       proj = 1.0;
@@ -785,17 +798,18 @@ void gc_step(void)
       speed = 0.5 * a_along * speed * speed * 0.013273228961416878;
       a_along = speed * gc_dcd_lookup(mach, 0.9, 0.0, 0.05, 43, 5,
         &gc_ConstP.GC_Logic_pred.deploy_tbl[0],
-        &gc_ConstP.GC_Logic_pred.dcd_tbl[0]) / 20.98 / 0.9;
+        &gc_ConstP.GC_Logic_pred.dcd_tbl[0]) / 21.041999999999998 / 0.9;
       rtb_gc_ctrl_ctrl_enable = (a_along > 0.5);
-      if ((!rtb_gc_ctrl_ctrl_enable) && (err_eff > 0.0)) {
+      if ((!rtb_gc_ctrl_ctrl_enable) && (min_ctrl_alt > 0.0)) {
         rtb_gc_ctrl_u_fallback = 0.9F;
       }
 
-      rtb_correcciondeproyeccion = (real32_T)err_eff;
+      rtb_correcciondeproyeccion = (real32_T)min_ctrl_alt;
       rtb_gc_ctrl_tgo_eff = (real32_T)fmax(t_to_apogee, 4.0);
       rtb_gc_ctrl_proj_factor = (real32_T)proj;
       rtb_normalizarporautoridad = (real32_T)(speed * gc_cd_clean_lookup(mach,
-        0.0, 0.05, 43, &gc_ConstP.GC_Logic_pred.cd_clean[0]) / 20.98);
+        0.0, 0.05, 43, &gc_ConstP.GC_Logic_pred.cd_clean[0]) /
+        21.041999999999998);
       rtb_gc_ctrl_authority = (real32_T)fmax(a_along, 0.5);
       rtb_gc_ctrl_a_meas = (real32_T)-(real_T)gc_U.gc_in.accel_body[0];
       if (-(real_T)gc_U.gc_in.vel_ned[2] <= 30.0) {
@@ -1056,6 +1070,8 @@ void gc_step(void)
   gc_DW.GCState_Memory_PreviousInput.t_airborne_s =
     rtb_gc_state_out_t_airborne_s;
   gc_DW.GCState_Memory_PreviousInput.t_barrido_s = rtb_gc_state_out_t_barrido_s;
+  gc_DW.GCState_Memory_PreviousInput.min_ctrl_alt_m =
+    rtb_gc_state_out_min_ctrl_alt_m;
 
   /* Update for DiscreteIntegrator: '<S1>/ki_inner' */
   gc_DW.ki_inner_DSTATE += 0.0153846154F * rtb_normalizarporautoridad;

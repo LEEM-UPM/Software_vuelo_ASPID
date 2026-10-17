@@ -650,18 +650,31 @@ UPLINK_CMD_RUMBO = 0x16       # 16 bits: rumbo de la rampa, centesimas de grado
 UPLINK_CMD_CAMARAS = 0x17     # 1 encender (siempre), 0 apagar (solo en tierra;
                               # primero paran de grabar, luego se cortan)
                               # desde el norte geografico, horario, 0..35999
+UPLINK_CMD_ALTURA_FRENO = 0x18  # 16 bits: altura del aerofreno, metros AGL
+                                # (por debajo no se abre). 0xFFFF consulta
+UPLINK_CMD_REALINEAR = 0x19     # reintentar el alineado del GNC: numero de
+                                # peticion 1..255 (el mismo = reintento)
 
 # Duracion de la prueba de aerofreno en el cohete (App/airbrake.h): 3 veces
 # fuera/dentro de 0,5 s y rampas de 2 s
 PRUEBA_AEROFRENO_S = 7.0
 
 # Comandos con parametro de 16 bits: van en el formato de 5 bytes
-COMANDOS_16 = (UPLINK_CMD_ANGULO, UPLINK_CMD_PING, UPLINK_CMD_RUMBO)
+COMANDOS_16 = (UPLINK_CMD_ANGULO, UPLINK_CMD_PING, UPLINK_CMD_RUMBO,
+               UPLINK_CMD_ALTURA_FRENO)
 
 # Angulo: valor especial que solo pide el acuse con el valor del cohete
 ANGULO_CONSULTA = 0xFFFF
 ANGULO_MAX_GRADOS = 90.0
 RUMBO_MAX_GRADOS = 359.99
+
+# Altura del aerofreno (App/freno_altura.h). El cohete acepta 0 < altura <
+# apogeo objetivo del GNC (gc_tun.apogee_target_agl_m, 3000 m en la v1.6);
+# si el GNC cambia el apogeo, cambiar FRENO_MAX_M. La consulta es la misma
+# que la del angulo (ANGULO_CONSULTA).
+FRENO_MIN_M = 1
+FRENO_MAX_M = 2999
+FRENO_FABRICA_M = 1500
 
 UPLINK_NOMBRES = {
     UPLINK_CMD_PEDIR_ESTADO: "pedir estado",
@@ -674,6 +687,8 @@ UPLINK_NOMBRES = {
     UPLINK_CMD_EXTENSION_AEROFRENO: "extension de aerofreno",
     UPLINK_CMD_RUMBO: "rumbo de la rampa",
     UPLINK_CMD_CAMARAS: "camaras",
+    UPLINK_CMD_ALTURA_FRENO: "altura del aerofreno",
+    UPLINK_CMD_REALINEAR: "realinear el GNC",
 }
 
 # uplink_denegado_t de App/uplink.h, en el mismo orden
@@ -685,7 +700,8 @@ MOTIVOS_DENEGACION = {
     4: "power no responde",
     5: "esta simulando una ruta",
     6: "no hay VUELO.BIN en la SD1",
-    7: "valor fuera de rango (angulo 0-90, rumbo 0-359,99, extension 0-100)",
+    7: "valor fuera de rango (angulo 0-90, rumbo 0-359,99, extension 0-100,"
+       " altura del aerofreno 1-2999)",
 }
 
 # Canal de CMD_PYRO_FIRE (ICD 6.3): ojo, empieza en 1, no en 0

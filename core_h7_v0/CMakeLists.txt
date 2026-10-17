@@ -64,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/uplink.c
     App/despliegue.c
     App/lanzamiento.c
+    App/freno_altura.c
     App/storage_stream.c
     App/pil_test.c
     App/airbrake.c

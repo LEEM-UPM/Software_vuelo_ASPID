@@ -20,9 +20,10 @@
                                      tick del GNC (416 Hz con la v1.6) */
 
 /*
- * La rampa del vuelo grabado: el dataset de la entrega v1.6 (como la v1.5) se generó con los
+ * La rampa del vuelo grabado: el dataset de la entrega v1.7 se generó con los
  * ajustables de fábrica (PIL_manifest.txt), elevación 84,5 grados (5,5 desde
- * la vertical) y azimut 0 (nav_tun en nav_data.c). (La v1.2 traía 84,5007.) Si
+ * la vertical) y azimut 144 (nav_tun en nav.c; hasta la v1.6, azimut 0).
+ * (La v1.2 traía 84,5007.) Si
  * se alinea con otra (la de vuelo), el EKF arrastra esa diferencia como sesgo
  * y el guiado ya no hace lo mismo que en la referencia: se vio el 2026-10-04,
  * el aerofreno oscilaba entre 0 y 25 % donde la referencia casi no lo movía.
@@ -30,7 +31,7 @@
  * TODO: que viaje en la cabecera de VUELO.BIN.
  */
 #define PLAYBACK_RAMPA_VERTICAL_DEG 5.5f
-#define PLAYBACK_RAMPA_RUMBO_DEG 0.0f
+#define PLAYBACK_RAMPA_RUMBO_DEG 144.0f
 /* El alabeo del vuelo grabado se CONOCE (0): se da en vez de medirlo. Medido
  * salía 21 grados (sesgo del IMU simulado con solo 5,5 de inclinación) y el
  * aerofreno ya no cuadraba con la referencia (20 % en vez de 17,8). */

@@ -18,6 +18,7 @@
 #include "despliegue.h"
 #include "emergencia.h"
 #include "memoria_vuelo.h"
+#include "freno_altura.h"
 #include "lanzamiento.h"
 #include "gnc_playback.h"
 #include "main.h"
@@ -537,7 +538,7 @@ static void _section_gnc(void) {
     g->rampa_alabeo_medido ? "medido " : "dado ", (double)g->rampa_alabeo_deg,
     g->nav_valid ? "   (alineado con esta)" : "");
   if (g->realineados > 0U) {
-    P("   Realineado %lu veces (comando 10 de la v1.5, al cambiar la rampa)\r\n",
+    P("   Realineado %lu veces (por radio o al cambiar la rampa)\r\n",
       (unsigned long)g->realineados);
   }
   if (g->rampa_cambiada) {
@@ -747,6 +748,11 @@ static void _section_status(void) {
     lanzamiento_rumbo_definido() ? "" : " (sin definir)",
     lanzamiento_definido() ? "origen " : "",
     lanzamiento_definido() ? lanzamiento_origen() : "sin definir, vertical");
+  P("   Altura del aerofreno %u m AGL (el GNC usa %.0f)   %s%s\r\n",
+    (unsigned)freno_altura_m(), (double)gnc_altura_freno_m(),
+    freno_altura_definida() ? "origen " : "",
+    freno_altura_definida() ? freno_altura_origen()
+                            : "sin definir, de fabrica");
 
   {
     static const char *const origen[] = {"desde el arranque", "por el despegue",

@@ -1,11 +1,11 @@
 /*
- * Banco PIL del GNC v1.6: inyecta en los modelos los vectores de la entrega
- * (GNC_V1_6/pil) y comprueba que la placa saca lo mismo que sacó el PC al
+ * Banco PIL del GNC v1.7: inyecta en los modelos los vectores de la entrega
+ * (GNC_V1_7/pil) y comprueba que la placa saca lo mismo que sacó el PC al
  * generarlos.
  *
- * Son 76487 filas a 416 Hz (183,9 s: el vuelo entero, del despegue al suelo,
+ * Son 75805 filas a 416 Hz (182,2 s: el vuelo entero, del despegue al suelo,
  * con drogue y main): nav y máquina de estados en cada fila, y el guiado una
- * de cada 8 (9561 filas a 52 Hz), intercalados como en vuelo. Es la única forma de ejercitar aquí la
+ * de cada 8 (9476 filas a 52 Hz), intercalados como en vuelo. Es la única forma de ejercitar aquí la
  * máquina de estados y el guiado: en el banco el cohete nunca ve una
  * aceleración de lanzamiento.
  *

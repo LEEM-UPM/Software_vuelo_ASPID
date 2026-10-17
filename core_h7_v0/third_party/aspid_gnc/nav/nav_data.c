@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'nav'.
  *
- * Model version                  : 1.51
+ * Model version                  : 1.53
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Sat Oct 10 20:59:19 2026
+ * C/C++ source code generated on : Sat Oct 17 22:54:15 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -62,7 +62,7 @@ const ConstP_nav_T nav_ConstP = {
     40.0,
     0.75,
     1.4,
-    0.0,
+    160.0,
     0.5,
     35U,
     1U,
@@ -115,7 +115,7 @@ const ConstP_nav_T nav_ConstP = {
       0.0F, 0.0F, 0.0F, 3.18325192e-6F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
       0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 3.18325192e-6F },
     1.5,
-    0.069813170079773182,
+    0.26179938779914941,              /* align_gyro_tol: PARCHE LOCAL, 15 grados/s */
     0.17453292519943295,
     0.5,
     100.0,
@@ -130,16 +130,16 @@ const ConstP_nav_T nav_ConstP = {
     { 0.0F, 0.0F, 0.0F },
     1U,
 
-    { 0.68820240051008841, -0.14488657053883955, 0.0 },
+    { 0.6874883437270638, -0.14467363845023407, 160.0 },
     84.5,
-    0.0
+    144.0
   },
 
   /* Expression: nav_state0
    * Referenced by: '<Root>/NavState_Memory'
    */
   {
-    { 0.740218103F, 0.0F, 0.672366798F, 0.0F },
+    { 0.228739977F, -0.639458835F, 0.207772776F, 0.703989267F },
 
     { 0.0F, 0.0F, 0.0F },
 
@@ -178,7 +178,7 @@ const ConstP_nav_T nav_ConstP = {
       0.000685389212F },
     0.0F,
 
-    { 0.68820240051008841, -0.14488657053883955, 0.0 },
+    { 0.6874883437270638, -0.14467363845023407, 160.0 },
     0U,
     0.0F,
     0U,

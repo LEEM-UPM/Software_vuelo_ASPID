@@ -48,6 +48,14 @@ incluye el de su propia carpeta.
   drogue no antes de 15 s de vuelo y forzado a los 30 s sin apogeo.
 - **Pirotecnia armada solo pasados 100 m de verdad.**
 
+**Parche local en `nav/nav.c` (2026-10-18), que hay que repetir al
+regenerar:** el umbral de giro del alineado sube de 4 a 15 grados/s
+(`0.26179938779914941` en vez de `0.069813170079773182`, también
+`align_gyro_tol` en `nav_data.c`). El giróscopo de la IMU1 tiene un sesgo de
+~6,7 grados/s en reposo y con 4 el filtro no se alineaba nunca: a los 60 s,
+ERROR 1. El sesgo lo absorbe el propio alineado (la media del giro pasa a
+`gyro_bias`). Hay que pedírselo a GNC para el modelo.
+
 **Fallo de la entrega, que sigue en la 1.6:** `nav.c` y `gc.c` definen los
 dos `rt_powd_snf()` sin `static` (idénticas), y el enlazado da *multiple
 definition*. `CMakeLists.txt` compila `gc/gc.c` con

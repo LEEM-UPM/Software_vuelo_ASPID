@@ -208,14 +208,15 @@ typedef struct {
   float rampa_error_deg;      /* ángulo entre la gravedad medida y la que
                                  espera la rampa: lo que nav.c exige < 10 */
   bool rampa_cambiada;        /* la de vuelo ya no es con la que se alineó */
-  uint32_t realineados;   /* veces que se ha mandado realinear (v1.5) */
+  uint32_t realineados;   /* veces que se ha realineado (gnc_realinear) */
   float accel_norm_mps2;  /* |a| de la IMU1 en el último tick */
   float gyro_norm_dps;    /* |w| de la IMU1 en el último tick */
 } gnc_data_t;
 
 /* Lo que exige nav.c para darse por alineado */
 #define GNC_ALIGN_STEPS 832U          /* 2 s a 416 Hz (v1.6; antes 200) */
-#define GNC_ALIGN_GYRO_MAX_DPS 4.0f   /* 0,0698 rad/s */
+#define GNC_ALIGN_GYRO_MAX_DPS 15.0f  /* 0,2618 rad/s: parche local en nav.c
+                                         (el modelo trae 4) */
 #define GNC_ALIGN_ACCEL_TOL_MPS2 1.5f /* alrededor de 9,80665 */
 #define GNC_ALIGN_ATT_MAX_DEG 10.0f   /* gravedad medida vs actitud de rampa */
 
@@ -262,8 +263,8 @@ void gnc_update(void);
  * gnc_set_rampa() es la de VUELO: se guarda y la aplican todos los
  * gnc_init() (también el del final de una simulación). En tierra (POWER ON
  * o MANTENIMIENTO) se aplica además EN EL ACTO: si el EKF ya estaba
- * alineado, lo REALINEA (comando 10 de la v1.5; en la placa tarda ~0,5 s).
- * En vuelo, en ERROR o simulando solo se guarda.
+ * alineado, lo REALINEA (gnc_realinear()). En vuelo, en ERROR o simulando
+ * solo se guarda.
  * gnc_set_rampa_solo_este_vuelo() es para la reproducción: la
  * rampa del vuelo grabado, hasta el próximo gnc_init(). Las dos van por el
  * mismo camino; llamar a la segunda justo después de gnc_init().
@@ -274,10 +275,46 @@ void gnc_set_rampa(float desde_vertical_deg, float rumbo_deg,
 void gnc_set_rampa_solo_este_vuelo(float desde_vertical_deg, float rumbo_deg,
                                    float alabeo_deg);
 
-/* Volver a alinear el EKF con el cohete quieto y la rampa que ya tiene
- * (comando 10, v1.5). Solo en POWER ON o MANTENIMIENTO y sin simular; false
- * si no se puede. Hoy no lo llama nadie: gnc_set_rampa() realinea sola. */
+/*
+ * Volver a alinear el EKF con la rampa de vuelo: lo pide tierra por radio
+ * (UPLINK_CMD_REALINEAR) si el alineado ha fallado, y gnc_set_rampa() al
+ * cambiar la rampa con el EKF ya alineado.
+ *
+ * NO usa el comando 10 del GNC (NAV_REALIGN). Con él la navegación deja de
+ * ser válida mientras se alinea (2 s), y la máquina de estados, si ya lo fue
+ * alguna vez, solo aguanta 1 s sin ella: acaba en ERROR 1. Desde ERROR
+ * tampoco vale (el filtro solo se alinea en READY, y el 10 solo pasa en
+ * READY o MANTENIMIENTO). Lo que se hace es gnc_init(): los tres modelos de
+ * cero, como al arrancar, y se alinea en cuanto el cohete esté quieto (o en
+ * 60 s, ERROR otra vez). El guiado repite el barrido del aerofreno al
+ * terminar de alinear.
+ *
+ * En POWER ON, MANTENIMIENTO o ERROR, con la fase en IDLE (ERROR puede ser en
+ * el aire) y sin simular; false si no se puede.
+ */
 bool gnc_realinear(void);
+
+/*
+ * ALTURA DEL AEROFRENO (v1.6): por debajo de esta altura AGL el guiado no
+ * pasa a control (COAST_CTRL) y el aerofreno no se abre. Es el ajustable
+ * gc_tun.min_ctrl_alt_agl_m, que el GNC lee en cada paso: cambiarlo vale
+ * para el siguiente gc_step() y sobrevive a gnc_init() (gc_initialize() no
+ * toca gc_tun). De fábrica, 1500 m.
+ *
+ * La v1.6 trae también el comando de telemetría 7 para lo mismo, pero ese
+ * valor vive en el estado del guiado: se pierde en cada gnc_init() (al
+ * terminar una simulación) y es un pulso que un segundo comando en el mismo
+ * tick pisaría. Por eso se escribe el ajustable.
+ *
+ * Válida si 0 < m < apogeo objetivo (gc_tun.apogee_target_agl_m), la misma
+ * regla que aplica el GNC a su comando 7. Que el cohete esté en tierra lo
+ * decide quien llama (uplink.c): el GNC pide no tocar los ajustables fuera
+ * de READY o MANTENIMIENTO.
+ */
+bool gnc_altura_freno_valida(float m);
+bool gnc_set_altura_freno(float m); /* false si no es válida: no cambia nada */
+float gnc_altura_freno_m(void);         /* la que usa el GNC ahora */
+float gnc_altura_freno_fabrica_m(void); /* la del código generado */
 
 /*
  * Fuente de los datos del GNC: los sensores de verdad o una reproduccion.

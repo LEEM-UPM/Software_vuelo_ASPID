@@ -88,6 +88,10 @@ static float s_rampa_uso_rumbo_deg;
 static float s_rampa_uso_alabeo_deg = GNC_ALABEO_MEDIR;
 static float s_rampa_alabeo_rad;
 
+/* Veces que se ha realineado (gnc_realinear): sobrevive a gnc_init(), que
+ * es justo lo que hace realinear */
+static uint32_t s_realineados;
+
 /* Por debajo de esta inclinación medida el alabeo no se puede medir */
 #define GNC_RAMPA_INCLINACION_MIN_ALABEO_DEG 2.0f
 
@@ -560,6 +564,7 @@ void gnc_init(void) {
   memset(&s_gps, 0, sizeof(s_gps));
   memset(&s_cmd, 0, sizeof(s_cmd));
   memset(&s_data, 0, sizeof(s_data));
+  s_data.realineados = s_realineados;
   s_tick = 0U;
   s_acc_media_ok = false;
 
@@ -644,13 +649,6 @@ static void _rampa_usar(float desde_vertical_deg, float rumbo_deg,
   _rampa_a_modelo();
 }
 
-/* Comando para la máquina de estados SOLO (el guiado no lo necesita) */
-static void _comando_sm(uint8_t id) {
-  s_cmd.id = id;
-  s_cmd.param = 0.0f;
-  s_cmd.sm_pending = true;
-}
-
 void gnc_set_rampa(float desde_vertical_deg, float rumbo_deg,
                    float alabeo_deg) {
   s_rampa_vuelo_vertical_deg = desde_vertical_deg;
@@ -660,32 +658,62 @@ void gnc_set_rampa(float desde_vertical_deg, float rumbo_deg,
     return; /* simulando: se aplica al acabar (gnc_init) */
   }
   /* En tierra (POWER ON o MANTENIMIENTO) se aplica YA: si el EKF ya estaba
-   * alineado, se le manda realinear (comando 10 de la v1.5, que la máquina
-   * de estados solo deja pasar en esos dos estados). En vuelo o en ERROR,
-   * en el siguiente gnc_init(). */
+   * alineado, se realinea (gnc_realinear: los tres modelos de cero, NO el
+   * comando 10, ver gnc.h). En vuelo o en ERROR, en el siguiente
+   * gnc_init(). */
   const int32_t st = state_machine_Y.sm_out.rocket_state;
   if ((st == GNC_ESTADO_POWER_ON) || (st == GNC_ESTADO_MANTENIMIENTO)) {
     const bool alineado = _nav_alineado();
     _rampa_usar(desde_vertical_deg, rumbo_deg, alabeo_deg);
     if (alineado) {
-      s_acc_media_ok = false;
-      _comando_sm(GNC_CMD_REALINEAR);
-      s_data.realineados++;
+      (void)gnc_realinear();
     }
   }
 }
 
 bool gnc_realinear(void) {
-  const int32_t st = state_machine_Y.sm_out.rocket_state;
-  if (s_replay || ((st != GNC_ESTADO_POWER_ON) &&
-                   (st != GNC_ESTADO_MANTENIMIENTO))) {
+  if (s_replay) {
     return false;
   }
-  s_acc_media_ok = false;
-  _comando_sm(GNC_CMD_REALINEAR);
-  s_data.realineados++;
+  const int32_t st = state_machine_Y.sm_out.rocket_state;
+  const bool estado_ok = (st == GNC_ESTADO_POWER_ON) ||
+                         (st == GNC_ESTADO_MANTENIMIENTO) ||
+                         (st == GNC_ESTADO_ERROR);
+  /* La fase, además: ERROR también puede ser en el aire */
+  if (!estado_ok || (s_data.flight_phase != GNC_FASE_IDLE)) {
+    return false;
+  }
+  s_realineados++;
+  gnc_init(); /* aplica la rampa de vuelo y pone s_data.realineados */
   return true;
 }
+
+/* El valor de fábrica, leído del ajustable antes de que nadie lo cambie */
+static bool s_freno_fabrica_leida;
+static float s_freno_fabrica_m;
+
+float gnc_altura_freno_fabrica_m(void) {
+  if (!s_freno_fabrica_leida) {
+    s_freno_fabrica_leida = true;
+    s_freno_fabrica_m = gc_tun.min_ctrl_alt_agl_m;
+  }
+  return s_freno_fabrica_m;
+}
+
+bool gnc_altura_freno_valida(float m) {
+  return (m > 0.0f) && (m < gc_tun.apogee_target_agl_m);
+}
+
+bool gnc_set_altura_freno(float m) {
+  (void)gnc_altura_freno_fabrica_m(); /* antes de pisarla */
+  if (!gnc_altura_freno_valida(m)) {
+    return false;
+  }
+  gc_tun.min_ctrl_alt_agl_m = m;
+  return true;
+}
+
+float gnc_altura_freno_m(void) { return gc_tun.min_ctrl_alt_agl_m; }
 
 void gnc_set_rampa_solo_este_vuelo(float desde_vertical_deg, float rumbo_deg,
                                    float alabeo_deg) {

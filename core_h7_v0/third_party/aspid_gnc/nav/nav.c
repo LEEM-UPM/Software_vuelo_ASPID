@@ -7,9 +7,9 @@
  *
  * Code generated for Simulink model 'nav'.
  *
- * Model version                  : 1.51
+ * Model version                  : 1.53
  * Simulink Coder version         : 25.2 (R2025b) 28-Jul-2025
- * C/C++ source code generated on : Sat Oct 10 20:59:19 2026
+ * C/C++ source code generated on : Sat Oct 17 22:54:15 2026
  *
  * Target selection: ert.tlc
  * Embedded hardware selection: ARM Compatible->ARM Cortex-M
@@ -29,7 +29,7 @@
 /* Exported block parameters */
 nav_tun_bus nav_tun = {
   84.5F,
-  0.0F
+  144.0F
 } ;                                    /* Variable: nav_tun
                                         * Referenced by: '<Root>/INS_Mechanization'
                                         */
@@ -46,7 +46,7 @@ ExtY_nav_T nav_Y;
 /* Forward declaration for local functions */
 static real_T nav_norm(const real_T x[3]);
 static real_T nav_maximum(const real_T x[3]);
-static real_T nav_norm_cq(const real_T x[4]);
+static real_T nav_norm_oq(const real_T x[4]);
 static void nav_quat_to_dcm_bn(const real_T q[4], real_T C[9]);
 static void nav_quat_de_rampa(real32_T b_nav_tun_rail_elev_deg, real32_T
   b_nav_tun_rail_azim_deg, real_T q[4]);
@@ -56,11 +56,11 @@ static void nav_lla_to_ned(const real_T lla[3], const real_T lla0[3], real_T
 static void nav_eye(real_T b_I[9]);
 static void nav_mldivide(const real_T A[9], const real_T B[3], real_T Y[3]);
 static void nav_diag(const real_T v[3], real_T d[9]);
-static void nav_mrdiv_l(real_T A[90], const real_T B[36]);
+static void nav_mrdiv_n(real_T A[90], const real_T B[36]);
 static void nav_estados_corregibles(boolean_T es_baro, boolean_T es_reenganche,
   real_T m[15]);
 static void nav_diag_b(const real_T v[15], real_T d[225]);
-static void nav_eye_d(real_T b_I[225]);
+static void nav_eye_p(real_T b_I[225]);
 static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4],
   const real32_T st_ref_pos_ned[3], const real32_T st_ref_vel_ned[3], const
   real32_T st_ref_accel_bias[3], const real32_T st_ref_gyro_bias[3], const
@@ -68,7 +68,7 @@ static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4]
   b_nav_data_gyro_bias_max);
 static boolean_T nav_all(const boolean_T x[4]);
 static void nav_isfinite(const real_T x[3], boolean_T b[3]);
-static boolean_T nav_all_g(const boolean_T x[3]);
+static boolean_T nav_all_b(const boolean_T x[3]);
 
 /* Function for MATLAB Function: '<Root>/EKF_Prediction' */
 static real_T nav_norm(const real_T x[3])
@@ -170,7 +170,7 @@ static real_T nav_maximum(const real_T x[3])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static real_T nav_norm_cq(const real_T x[4])
+static real_T nav_norm_oq(const real_T x[4])
 {
   real_T absxk;
   real_T scale;
@@ -290,7 +290,7 @@ static void nav_quat_de_rampa(real32_T b_nav_tun_rail_elev_deg, real32_T
   q[1] = q_tmp * cy - sp * sy;
   q[2] = q_tmp * sy + sp * cy;
   q[3] = cp * sy - q_tmp_0 * cy;
-  cp = nav_norm_cq(q);
+  cp = nav_norm_oq(q);
   q[0] /= cp;
   q[1] /= cp;
   q[2] /= cp;
@@ -390,7 +390,7 @@ static void nav_diag(const real_T v[3], real_T d[9])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static void nav_mrdiv_l(real_T A[90], const real_T B[36])
+static void nav_mrdiv_n(real_T A[90], const real_T B[36])
 {
   real_T b_A[36];
   real_T smax;
@@ -544,7 +544,7 @@ static void nav_diag_b(const real_T v[15], real_T d[225])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static void nav_eye_d(real_T b_I[225])
+static void nav_eye_p(real_T b_I[225])
 {
   int32_T k;
   memset(&b_I[0], 0, 225U * sizeof(real_T));
@@ -571,7 +571,7 @@ static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4]
   dq[1] = 0.5 * dx[0];
   dq[2] = 0.5 * dx[1];
   dq[3] = 0.5 * dx[2];
-  a_idx_3 = nav_norm_cq(dq);
+  a_idx_3 = nav_norm_oq(dq);
   a_idx_0 = 1.0 / a_idx_3;
   a_idx_1 = dq[1] / a_idx_3;
   a_idx_2 = dq[2] / a_idx_3;
@@ -584,7 +584,7 @@ static void nav_apply_correction(nav_state *st, const real32_T st_ref_quat_nb[4]
               st_ref_quat_nb[0] * a_idx_2) + st_ref_quat_nb[1] * a_idx_3;
   q_new[3] = ((a_idx_0 * st_ref_quat_nb[3] + a_idx_1 * st_ref_quat_nb[2]) -
               st_ref_quat_nb[1] * a_idx_2) + st_ref_quat_nb[0] * a_idx_3;
-  a_idx_3 = nav_norm_cq(q_new);
+  a_idx_3 = nav_norm_oq(q_new);
   q_new[0] /= a_idx_3;
   q_new[1] /= a_idx_3;
   q_new[2] /= a_idx_3;
@@ -692,7 +692,7 @@ static void nav_isfinite(const real_T x[3], boolean_T b[3])
 }
 
 /* Function for MATLAB Function: '<Root>/EKF_Update' */
-static boolean_T nav_all_g(const boolean_T x[3])
+static boolean_T nav_all_b(const boolean_T x[3])
 {
   int32_T k;
   boolean_T exitg1;
@@ -946,7 +946,10 @@ void nav_step(void)
     rtb_state_out.accel_ned[2] = 0.0F;
     rtb_state_out.gnss_age_s = (real32_T)fmin
       (nav_DW.NavState_Memory_PreviousInput.gnss_age_s + dt, 10000.0);
-    if (nav_norm(omega_b) > 0.069813170079773182) {
+    /* PARCHE LOCAL (no viene del modelo): umbral de quietud del alineado
+     * subido de 4 a 15 grados/s, por el sesgo de ~6,7 grados/s del giroscopo
+     * de la IMU1. Al regenerar el GNC hay que volver a ponerlo (ver README). */
+    if (nav_norm(omega_b) > 0.26179938779914941) {
       lg_ok = true;
     } else {
       lg_ok = (fabs(nav_norm(a_lg) - 9.80665) > 1.5);
@@ -1170,7 +1173,7 @@ void nav_step(void)
                nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
               d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
         dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      dt_meas = nav_norm_cq(q);
+      dt_meas = nav_norm_oq(q);
       rtb_state_out.quat_nb[0] = (real32_T)(q[0] / dt_meas);
       rtb_state_out.quat_nb[1] = (real32_T)(q[1] / dt_meas);
       rtb_state_out.quat_nb[2] = (real32_T)(q[2] / dt_meas);
@@ -1234,7 +1237,7 @@ void nav_step(void)
                nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
               d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
         dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      dt_meas = nav_norm_cq(q);
+      dt_meas = nav_norm_oq(q);
       q[0] /= dt_meas;
       q[1] /= dt_meas;
       q[2] /= dt_meas;
@@ -1269,7 +1272,7 @@ void nav_step(void)
                    nav_DW.NavState_Memory_PreviousInput.quat_nb[1] * n_exp) -
                   d_b_idx_1 * nav_DW.NavState_Memory_PreviousInput.quat_nb[2]) +
         dt_meas * nav_DW.NavState_Memory_PreviousInput.quat_nb[3];
-      dt_meas = nav_norm_cq(q_mid);
+      dt_meas = nav_norm_oq(q_mid);
       q_mid_0[0] = q_mid[0] / dt_meas;
       q_mid_0[1] = q_mid[1] / dt_meas;
       q_mid_0[2] = q_mid[2] / dt_meas;
@@ -1863,7 +1866,7 @@ void nav_step(void)
           }
         }
 
-        nav_mrdiv_l(tmp, tmp_1);
+        nav_mrdiv_n(tmp, tmp_1);
         nav_estados_corregibles(false, hg_ok, K_b);
         nav_diag_b(K_b, Fdt_0);
         for (i = 0; i < 6; i++) {
@@ -1877,7 +1880,7 @@ void nav_step(void)
           }
         }
 
-        nav_eye_d(Fdt_0);
+        nav_eye_p(Fdt_0);
         for (i = 0; i < 15; i++) {
           for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
             dt_meas = 0.0;
@@ -1975,8 +1978,8 @@ void nav_step(void)
       f_b[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
       w = nav_norm(f_b);
       ang = nav_U.nav_in.baro.press_pa / 101325.0 * 1.225 * 0.5 * w * w;
-      use_pos = (w / sqrt(fmax(-0.0065 * dt_meas + 288.15, 150.0) * 401.87) >
-                 0.75);
+      use_pos = (w / sqrt(fmax((dt_meas + 160.0) * -0.0065 + 288.15, 150.0) *
+                          401.87) > 0.75);
       if (use_pos) {
         nav_DW.NavState_Memory_PreviousInput.baro_rej_cnt = 0U;
       }
@@ -2045,7 +2048,7 @@ void nav_step(void)
             }
           }
 
-          nav_eye_d(Fdt_0);
+          nav_eye_p(Fdt_0);
           for (i = 0; i < 15; i++) {
             for (gnss_cnt = 0; gnss_cnt < 15; gnss_cnt++) {
               Fdt_tmp = 15 * i + gnss_cnt;
@@ -2134,22 +2137,22 @@ void nav_step(void)
     f_b[1] = nav_DW.NavState_Memory_PreviousInput.pos_ned[1];
     f_b[2] = nav_DW.NavState_Memory_PreviousInput.pos_ned[2];
     nav_isfinite(f_b, tmp_3);
-    if (nav_all_g(tmp_3)) {
+    if (nav_all_b(tmp_3)) {
       f_b[0] = nav_DW.NavState_Memory_PreviousInput.vel_ned[0];
       f_b[1] = nav_DW.NavState_Memory_PreviousInput.vel_ned[1];
       f_b[2] = nav_DW.NavState_Memory_PreviousInput.vel_ned[2];
       nav_isfinite(f_b, tmp_3);
-      if (nav_all_g(tmp_3)) {
+      if (nav_all_b(tmp_3)) {
         f_b[0] = nav_DW.NavState_Memory_PreviousInput.accel_bias[0];
         f_b[1] = nav_DW.NavState_Memory_PreviousInput.accel_bias[1];
         f_b[2] = nav_DW.NavState_Memory_PreviousInput.accel_bias[2];
         nav_isfinite(f_b, tmp_3);
-        if (nav_all_g(tmp_3)) {
+        if (nav_all_b(tmp_3)) {
           f_b[0] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[0];
           f_b[1] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[1];
           f_b[2] = nav_DW.NavState_Memory_PreviousInput.gyro_bias[2];
           nav_isfinite(f_b, tmp_3);
-          use_pos = nav_all_g(tmp_3);
+          use_pos = nav_all_b(tmp_3);
         } else {
           use_pos = false;
         }

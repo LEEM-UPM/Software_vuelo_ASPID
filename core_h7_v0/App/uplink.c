@@ -3,6 +3,8 @@
 #include "airbrake.h"
 #include "aspid_data.h"
 #include "camaras.h"
+#include "emergencia.h"
+#include "freno_altura.h"
 #include "gnc.h"
 #include "gnc_playback.h"
 #include "lanzamiento.h"
@@ -26,6 +28,7 @@ static uint32_t s_test_proximo_estado_ms;
 static uint8_t s_ultimo_piro;
 static uint32_t s_piros_aceptados;
 static uint8_t s_ultima_prueba_aerofreno; /* número; 0 = ninguna todavía */
+static uint8_t s_ultimo_realineado;       /* número; 0 = ninguno todavía */
 
 /* Simulación: para avisar a tierra al empezar, durante y al acabar */
 static bool s_simulando_previo;
@@ -132,8 +135,16 @@ static uint8_t s_acuses;
 
 /* Contesta a un comando con el valor que el cohete tiene AHORA */
 static void _acuse(uint8_t cmd, uint8_t resultado, uint16_t valor) {
-  const bool definido = (cmd == UPLINK_CMD_RUMBO) ? lanzamiento_rumbo_definido()
-                                                  : lanzamiento_definido();
+  bool definido;
+  bool guardado;
+  if (cmd == UPLINK_CMD_ALTURA_FRENO) {
+    definido = freno_altura_definida();
+    guardado = freno_altura_guardada();
+  } else {
+    definido = (cmd == UPLINK_CMD_RUMBO) ? lanzamiento_rumbo_definido()
+                                         : lanzamiento_definido();
+    guardado = lanzamiento_guardado();
+  }
   uint8_t a[UPLINK_ACUSE_BYTES] = {0};
   a[0] = UPLINK_ACUSE_MARCA;
   a[1] = cmd;
@@ -141,8 +152,7 @@ static void _acuse(uint8_t cmd, uint8_t resultado, uint16_t valor) {
   a[3] = (uint8_t)(valor & 0xFFU);
   a[4] = (uint8_t)(valor >> 8);
   a[5] = s_acuses++;
-  a[6] = (uint8_t)((definido ? 0x01U : 0U) |
-                   (lanzamiento_guardado() ? 0x02U : 0U));
+  a[6] = (uint8_t)((definido ? 0x01U : 0U) | (guardado ? 0x02U : 0U));
   /* Cómo oyó el cohete ESTE comando: tierra ve el enlace de subida desde
    * este lado (RSSI, SNR y error de frecuencia) */
   if (s_rx_meta.valida) {
@@ -287,6 +297,58 @@ static void _ejecutar(const sys_state *state, uint8_t cmd, uint16_t parametro) {
                     GNC_ALABEO_MEDIR);
     }
     _acuse(cmd, (uint8_t)motivo, lanzamiento_rumbo_centesimas());
+    if (motivo != UPLINK_DENEGADO_NADA) {
+      s_denegados++;
+      s_ultimo_denegado = motivo;
+      return;
+    }
+    break;
+  }
+
+  case UPLINK_CMD_ALTURA_FRENO: {
+    if (parametro == UPLINK_ANGULO_CONSULTA) {
+      _acuse(cmd, (uint8_t)UPLINK_DENEGADO_NADA,
+             (uint16_t)(gnc_altura_freno_m() + 0.5f));
+      break;
+    }
+    /* En vuelo no: el guiado estaría persiguiendo con una altura distinta
+     * de la del ciclo anterior. En tierra vale para el siguiente paso. */
+    uplink_denegado_t motivo = UPLINK_DENEGADO_NADA;
+    if (!_angulo_cambiable()) {
+      motivo = gnc_playback_active() ? UPLINK_DENEGADO_SIMULANDO
+                                     : UPLINK_DENEGADO_FUERA_DE_TIERRA;
+    } else if (!freno_altura_definir(parametro)) {
+      motivo = UPLINK_DENEGADO_FUERA_DE_RANGO;
+    } else {
+      (void)gnc_set_altura_freno((float)freno_altura_m());
+    }
+    /* Con la que usa DE VERDAD el GNC, no con la pedida */
+    _acuse(cmd, (uint8_t)motivo, (uint16_t)(gnc_altura_freno_m() + 0.5f));
+    if (motivo != UPLINK_DENEGADO_NADA) {
+      s_denegados++;
+      s_ultimo_denegado = motivo;
+      return;
+    }
+    break;
+  }
+
+  case UPLINK_CMD_REALINEAR: {
+    uplink_denegado_t motivo = UPLINK_DENEGADO_NADA;
+    if (parametro == 0U) {
+      motivo = UPLINK_DENEGADO_FUERA_DE_RANGO;
+    } else if (parametro == s_ultimo_realineado) {
+      /* Reintento de tierra de una petición ya hecha: solo se contesta */
+    } else if (gnc_playback_active()) {
+      motivo = UPLINK_DENEGADO_SIMULANDO;
+    } else if ((emergencia_modo() != EMERGENCIA_INICIO) || !_en_tierra() ||
+               !gnc_realinear()) {
+      /* En el modo de emergencia (o tras un vuelo) el GNC no está en marcha,
+       * y gnc_get_data() es el de la emergencia */
+      motivo = UPLINK_DENEGADO_FUERA_DE_TIERRA;
+    } else {
+      s_ultimo_realineado = (uint8_t)parametro;
+    }
+    _acuse(cmd, (uint8_t)motivo, parametro);
     if (motivo != UPLINK_DENEGADO_NADA) {
       s_denegados++;
       s_ultimo_denegado = motivo;
